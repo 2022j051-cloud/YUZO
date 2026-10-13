@@ -1,0 +1,11 @@
+{
+  "name": "遊蔵 - ゲームコレクション",
+  "short_name": "遊蔵",
+  "description": "ゲームコレクション管理・遊蔵",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#111315",
+  "theme_color": "#171717",
+  "icons": []
+}
