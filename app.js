@@ -5,7 +5,7 @@ const IDB_STORE = "collection";
 const COVER_TEMPLATES_KEY = "retro-shelf-cover-templates-v1";
 const DISPLAY_SETTINGS_KEY = "retro-shelf-display-settings-v1";
 const COLLECTION_VIEW_KEY = "retro-shelf-collection-view-v1";
-const DEFAULT_DISPLAY_SETTINGS = { fields: ["title", "platform", "publisher", "editions", "clearStatus"], dimCleared: true, coverBorder: true, coverRounded: true, theme: "system" };
+const DEFAULT_DISPLAY_SETTINGS = { fields: ["title", "platform", "publisher", "editions", "region", "clearStatus"], dimCleared: true, coverBorder: true, coverRounded: true, theme: "system" };
 let displaySettings = { ...DEFAULT_DISPLAY_SETTINGS, fields: [...DEFAULT_DISPLAY_SETTINGS.fields] };
 function defaultCoverTemplates() { return []; }
 let coverTemplates = [];
@@ -14,7 +14,7 @@ let games = [];
 let dictionaries = normalizeDictionaries(null);
 let currentCover = "";
 let activeDetailId = null;
-let activeFilters = { title: [], platform: [], publisher: [], edition: [], code: [], series: [], genre: [], releaseDate: [], clearStatus: [], preorder: [] };
+let activeFilters = { title: [], platform: [], publisher: [], edition: [], code: [], seriesParent: [], seriesChild: [], genre: [], releaseDate: [], clearStatus: [], preorder: [] };
 let activeDictionaryCategoryId = "hardware";
 let pendingDictionaryDelete = null;
 let toastTimer;
@@ -88,42 +88,26 @@ function normalizeName(value) {
 }
 function entry(name, aliases = []) { return { id: makeId("entry"), name, aliases }; }
 function defaultCategories() {
+  // 新規利用者にはマスターデータをプリセットせず、すべて利用者自身が追加する。
   return [
-    { id: "hardware", name: "ハード", binding: "platform", multiple: false, required: true, builtIn: true, entries: [
-      entry("ファミリーコンピュータ", ["ファミコン", "FC", "Famicom"]),
-      entry("スーパーファミコン", ["スーファミ", "SFC", "Super Famicom"]),
-      entry("ゲームボーイ", ["GB", "Game Boy"]),
-      entry("ゲームボーイアドバンス", ["GBA", "Game Boy Advance"]),
-      entry("Nintendo 64", ["N64", "ニンテンドー64"]),
-      entry("ニンテンドーDS", ["DS", "Nintendo DS"]),
-      entry("メガドライブ", ["Mega Drive", "MD"]),
-      entry("セガサターン", ["SS", "Sega Saturn"]),
-      entry("ドリームキャスト", ["DC", "Dreamcast"]),
-      entry("PlayStation", ["PS", "プレステ", "プレイステーション"]),
-      entry("PlayStation 2", ["PS2", "プレステ2", "プレイステーション2"]),
-      entry("PlayStation 3", ["PS3"]), entry("PlayStation 4", ["PS4"]), entry("PlayStation 5", ["PS5"]),
-      entry("Nintendo Switch", ["Switch", "ニンテンドースイッチ"]), entry("Nintendo Switch 2", ["Switch 2", "SW2", "ニンテンドースイッチ2"]),
-      entry("Xbox", []), entry("Xbox 360", []), entry("Xbox One", []), entry("Xbox Series X|S", ["Xbox Series X", "Xbox Series S"]),
-      entry("PCエンジン", ["PCE", "PC Engine"])
-    ] },
+    { id: "hardware", name: "ハード", binding: "platform", multiple: false, required: true, builtIn: true, entries: [] },
     { id: "maker", name: "メーカー", binding: "publisher", multiple: false, required: false, builtIn: true, entries: [] },
     { id: "series", name: "シリーズ", binding: "series", multiple: false, required: false, builtIn: true, entries: [] },
+    { id: "region", name: "地域", binding: "region", multiple: false, required: false, builtIn: true, entries: [] },
     { id: "genre", name: "ジャンル", binding: "genres", multiple: true, required: false, builtIn: true, entries: [] },
     { id: "tag", name: "タグ", binding: "tags", multiple: true, required: false, builtIn: true, entries: [] },
-    { id: "edition", name: "エディション", binding: "editions", multiple: true, required: false, builtIn: true, entries: [
-      entry("通常版"), entry("ソフトのみ"), entry("BEST版"), entry("廉価版")
-    ] }
+    { id: "edition", name: "エディション", binding: "editions", multiple: true, required: false, builtIn: true, entries: [] }
   ];
 }
 function normalizeEntry(raw) {
-  return { id: String(raw?.id || makeId("entry")), name: String(raw?.name || "").trim(), aliases: unique((Array.isArray(raw?.aliases) ? raw.aliases : []).map(x => String(x).trim()).filter(Boolean)), coverUrlTemplate: String(raw?.coverUrlTemplate || "").trim() };
+  return { id: String(raw?.id || makeId("entry")), name: String(raw?.name || "").trim(), aliases: unique((Array.isArray(raw?.aliases) ? raw.aliases : []).map(x => String(x).trim()).filter(Boolean)), coverUrlTemplate: String(raw?.coverUrlTemplate || "").trim(), parentId: String(raw?.parentId || "") };
 }
 function normalizeDictionaries(raw) {
   const defaults = defaultCategories();
   const source = Array.isArray(raw?.categories) ? raw.categories : [];
   const consumed = new Set();
   const categories = defaults.map(def => {
-    const foundIndex = source.findIndex(c => c && (c.id === def.id || normalizeName(c.name) === normalizeName(def.name)));
+    const foundIndex = source.findIndex(c => c && (c.id === def.id || normalizeName(c.name) === normalizeName(def.name) || (def.id === "region" && (c.id === "language" || normalizeName(c.name) === normalizeName("言語")))));
     if (foundIndex < 0) return def;
     consumed.add(foundIndex);
     const found = source[foundIndex];
@@ -165,6 +149,7 @@ function canonicalizeGame(game, createMissing = true) {
   game.platform = canonicalizeValue("hardware", game.platform, createMissing);
   game.publisher = canonicalizeValue("maker", game.publisher, createMissing);
   game.series = canonicalizeValue("series", game.series, createMissing);
+  game.region = canonicalizeValue("region", game.region || game.language || "", createMissing); delete game.language;
   game.genres = unique((Array.isArray(game.genres) ? game.genres : splitList(game.genres)).map(x => canonicalizeValue("genre", x, createMissing)).filter(Boolean));
   game.tags = unique((Array.isArray(game.tags) ? game.tags : splitList(game.tags)).map(x => canonicalizeValue("tag", x, createMissing)).filter(Boolean));
   game.editions = unique((Array.isArray(game.editions) ? game.editions : splitList(game.editions)).map(x => canonicalizeValue("edition", x, createMissing)).filter(Boolean));
@@ -262,12 +247,70 @@ $("addEditionBtn").addEventListener("click", async () => {
 $("customEdition").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); $("addEditionBtn").click(); } });
 
 function updateDatalists() {
-  const links = [["hardware", "platformOptions"], ["maker", "publisherOptions"], ["series", "seriesOptions"], ["genre", "genreOptions"], ["tag", "tagOptions"]];
-  links.forEach(([categoryId, listId]) => {
-    const list = $(listId); const category = getCategory(categoryId);
-    if (list && category) list.innerHTML = category.entries.map(item => `<option value="${escapeHtml(item.name)}">`).join("");
-  });
+  const list = $("regionOptions"), category = getCategory("region");
+  if (list && category) list.innerHTML = category.entries.map(item => `<option value="${escapeHtml(item.name)}">`).join("");
 }
+function setupSingleValueSuggestions(inputId, categoryId, popupId) {
+  const input = $(inputId), popup = $(popupId);
+  if (!input || !popup) return;
+  function hide() { popup.hidden = true; popup.innerHTML = ""; }
+  function render() {
+    const category = getCategory(categoryId);
+    if (!category) return hide();
+    const query = normalizeSearchText(input.value);
+    const matches = category.entries.filter(item => !query || normalizeSearchText(item.name).includes(query) || item.aliases.some(alias => normalizeSearchText(alias).includes(query))).slice(0, 12);
+    if (!matches.length) return hide();
+    popup.innerHTML = matches.map(item => {
+      const parent = categoryId === "series" ? category.entries.find(entry => entry.id === item.parentId) : null;
+      const label = parent ? `${parent.name} › ${item.name}` : item.name;
+      return `<button type="button" class="suggestion-option" data-suggestion-value="${escapeHtml(item.name)}">${escapeHtml(label)}</button>`;
+    }).join("");
+    popup.hidden = false;
+  }
+  input.addEventListener("input", render); input.addEventListener("focus", render); input.addEventListener("click", render);
+  input.addEventListener("keydown", event => { if (event.key === "Escape") hide(); if (event.key === "ArrowDown" && !popup.hidden) { event.preventDefault(); popup.querySelector("button")?.focus(); } });
+  popup.addEventListener("pointerdown", event => { if (event.target.closest("[data-suggestion-value]")) event.preventDefault(); });
+  popup.addEventListener("click", event => { const button = event.target.closest("[data-suggestion-value]"); if (!button) return; input.value = button.dataset.suggestionValue; hide(); input.focus(); input.dispatchEvent(new Event("change", { bubbles: true })); });
+  document.addEventListener("click", event => { if (event.target !== input && !popup.contains(event.target)) hide(); });
+}
+setupSingleValueSuggestions("platform", "hardware", "platformSuggestions");
+setupSingleValueSuggestions("publisher", "maker", "publisherSuggestions");
+setupSingleValueSuggestions("series", "series", "seriesSuggestions");
+// ジャンル・タグは datalist の複数値入力に依存せず、現在の区切り後の語句で候補を再表示する。
+function setupMultiValueSuggestions(inputId, categoryId, popupId) {
+  const input = $(inputId), popup = $(popupId);
+  if (!input || !popup) return;
+  function currentPart() {
+    const value = input.value;
+    const last = Math.max(value.lastIndexOf(","), value.lastIndexOf("，"), value.lastIndexOf("、"), value.lastIndexOf(";"), value.lastIndexOf("；"), value.lastIndexOf("|"), value.lastIndexOf("\n"));
+    return { prefix: last >= 0 ? value.slice(0, last + 1) : "", query: (last >= 0 ? value.slice(last + 1) : value).trim(), selected: splitList(last >= 0 ? value.slice(0, last) : "") };
+  }
+  function hide() { popup.hidden = true; popup.innerHTML = ""; }
+  function render() {
+    const category = getCategory(categoryId), part = currentPart();
+    if (!category) return hide();
+    const q = normalizeSearchText(part.query);
+    const matches = category.entries.filter(item => !part.selected.some(v => normalizeName(v) === normalizeName(item.name)) && (!q || normalizeSearchText(item.name).includes(q) || item.aliases.some(a => normalizeSearchText(a).includes(q)))).slice(0, 12);
+    if (!matches.length) return hide();
+    popup.innerHTML = matches.map(item => `<button type="button" class="suggestion-option" data-suggestion-value="${escapeHtml(item.name)}">${escapeHtml(item.name)}</button>`).join("");
+    popup.hidden = false;
+  }
+  input.addEventListener("input", render);
+  input.addEventListener("focus", render);
+  input.addEventListener("click", render);
+  input.addEventListener("keydown", event => { if (event.key === "Escape") hide(); });
+  popup.addEventListener("pointerdown", event => { if (event.target.closest("[data-suggestion-value]")) event.preventDefault(); });
+  popup.addEventListener("click", event => {
+    const button = event.target.closest("[data-suggestion-value]"); if (!button) return;
+    const part = currentPart();
+    input.value = `${part.prefix}${button.dataset.suggestionValue}, `;
+    input.focus(); render();
+  });
+  document.addEventListener("click", event => { if (event.target !== input && !popup.contains(event.target)) hide(); });
+}
+setupMultiValueSuggestions("genres", "genre", "genreSuggestions");
+setupMultiValueSuggestions("tags", "tag", "tagSuggestions");
+
 function normalizeSearchText(value) {
   let text = String(value ?? "").normalize("NFKC").toLocaleLowerCase("ja");
   // カタカナをひらがなへ統一し、全角・半角や空白・記号の違いを吸収する。
@@ -285,13 +328,29 @@ async function saveCollectionView() {
   // Persist the sort preference only; transient search and filter selections reset on reload.
   return writeStored(COLLECTION_VIEW_KEY, { sort: $("sortSelect")?.value || "title-asc" });
 }
+function getSeriesEntry(value) { return resolveEntry(getCategory("series"), String(value || "")); }
+function seriesDisplayName(value) {
+  const category = getCategory("series"), item = getSeriesEntry(value);
+  if (!item) return String(value || "");
+  const parent = category?.entries.find(entry => entry.id === item.parentId);
+  // Child first, parent second, as requested.
+  return parent ? `${item.name} > ${parent.name}` : item.name;
+}
+function seriesFilterNames(value) {
+  const category = getCategory("series"), item = getSeriesEntry(value);
+  const parent = item?.parentId ? category?.entries.find(entry => entry.id === item.parentId) : null;
+  return {
+    parent: parent?.name || (item ? item.name : String(value || "")),
+    child: parent ? item.name : ""
+  };
+}
 function gameMatchesSearch(game, query) {
   const needle = normalizeSearchText(query);
   if (!needle) return true;
   const values = [
-    ...searchVariants("hardware", game.platform), ...searchVariants("maker", game.publisher),
+    ...searchVariants("hardware", game.platform), ...searchVariants("maker", game.publisher), ...searchVariants("region", game.region),
     ...(game.editions || []).flatMap(value => searchVariants("edition", value)),
-    ...Object.values(game.codes || {}), game.title, game.series, ...(game.genres || []), ...(game.tags || []), game.notes,
+    ...Object.values(game.codes || {}), game.title, game.series, seriesDisplayName(game.series), ...(game.genres || []), ...(game.tags || []), game.notes,
     game.releaseDate, game.releaseDate ? game.releaseDate.replace(/-/g, "/") : "",
     game.clearStatus === "cleared" ? "クリア済み クリア済 クリア" : "未クリア 未プレイ",
     game.preorder ? "予約済み 予約済 予約 preorder preordered" : "予約していない 未予約"
@@ -316,7 +375,9 @@ function gameMatchesFilters(game, ignorePlatform = false) {
   if (f.edition.length && !(game.editions || []).some(x => f.edition.includes(x))) return false;
   if (f.title.length && !f.title.includes(game.title)) return false;
   if (f.code.length && !Object.values(game.codes || {}).some(value => f.code.includes(value))) return false;
-  if (f.series.length && !f.series.includes(game.series)) return false;
+  const seriesNames = seriesFilterNames(game.series);
+  if (f.seriesParent.length && !f.seriesParent.includes(seriesNames.parent)) return false;
+  if (f.seriesChild.length && (!seriesNames.child || !f.seriesChild.includes(seriesNames.child))) return false;
   if (f.genre.length && !(game.genres || []).some(x => f.genre.includes(x))) return false;
   if (f.releaseDate.length) {
     const from = f.releaseDate[0] || "";
@@ -391,6 +452,7 @@ function render() {
     const dim = displaySettings.dimCleared && game.clearStatus === "cleared" ? " is-cleared" : "";
     const meta = [];
     if (fields.has("publisher") && game.publisher) meta.push(game.publisher);
+    if (fields.has("region") && game.region) meta.push(game.region);
     if (fields.has("clearStatus")) meta.push(game.clearStatus === "cleared" ? "クリア済み" : "未クリア");
     const tags = [];
     if (fields.has("editions")) tags.push(...(game.editions || []).slice(0,2));
@@ -418,7 +480,8 @@ function renderFilterGroups() {
     ["platform", "ハード", uniqueValues(games.map(g => g.platform || "ハード未設定"))],
     ["publisher", "メーカー", uniqueValues(games.map(g => g.publisher || "メーカー未設定"))],
     ["edition", "エディション", uniqueValues(games.flatMap(g => g.editions || []))],
-    ["series", "シリーズ", uniqueValues(games.map(g => g.series))],
+    ["seriesParent", "親シリーズ", uniqueValues(games.map(g => seriesFilterNames(g.series).parent))],
+    ["seriesChild", "子シリーズ", uniqueValues(games.map(g => seriesFilterNames(g.series).child))],
     ["genre", "ジャンル", uniqueValues(games.flatMap(g => g.genres || []))],
     ["clearStatus", "クリア状況", [["unplayed", "未クリア"], ["cleared", "クリア済み"]]],
     ["preorder", "予約状況", [["yes", "予約済み"], ["no", "未予約"]]]
@@ -448,7 +511,7 @@ $("sortSelect").addEventListener("change", () => { render(); saveCollectionView(
 $("filterBtn").addEventListener("click", () => { renderFilterGroups(); $("filterDialog").showModal(); });
 $("closeFilter").addEventListener("click", () => $("filterDialog").close());
 $("applyFilters").addEventListener("click", () => {
-  const next = { title: [], platform: [], publisher: [], edition: [], code: [], series: [], genre: [], releaseDate: [], clearStatus: [], preorder: [] };
+  const next = { title: [], platform: [], publisher: [], edition: [], code: [], seriesParent: [], seriesChild: [], genre: [], releaseDate: [], clearStatus: [], preorder: [] };
   $("filterGroups").querySelectorAll("input[data-filter-category]:checked").forEach(input => next[input.dataset.filterCategory].push(input.value));
   const dateFrom = $("filterReleaseFrom")?.value || "";
   const dateTo = $("filterReleaseTo")?.value || "";
@@ -460,7 +523,7 @@ $("applyFilters").addEventListener("click", () => {
   activeFilters = next; $("filterDialog").close(); render(); saveCollectionView();
 });
 $("clearFilters").addEventListener("click", () => {
-  activeFilters = { title: [], platform: [], publisher: [], edition: [], code: [], series: [], genre: [], releaseDate: [], clearStatus: [], preorder: [] };
+  activeFilters = { title: [], platform: [], publisher: [], edition: [], code: [], seriesParent: [], seriesChild: [], genre: [], releaseDate: [], clearStatus: [], preorder: [] };
   $("filterGroups").querySelectorAll("input[data-filter-category]").forEach(input => { input.checked = false; });
   if ($("filterReleaseFrom")) $("filterReleaseFrom").value = "";
   if ($("filterReleaseTo")) $("filterReleaseTo").value = "";
@@ -512,9 +575,9 @@ function resizeImage(file, maxEdge = 900, quality = 0.82) {
 }
 function openTitleImageSearch() {
   const title = $("title").value.trim(), platform = $("platform").value.trim();
-  const query = [title, platform, "ゲーム パッケージ 表紙"].filter(Boolean).join(" ");
   if (!title || !platform) { showToast("タイトルとハードを入力してください"); return; }
-  window.open("https://www.google.com/search?tbm=isch&q=" + encodeURIComponent(query), "_blank", "noopener");
+  const query = [title, platform, "ゲーム パッケージ 表紙"].filter(Boolean).join(" ");
+  window.open("https://www.google.com/search?tbm=isch&q=" + encodeURIComponent(query), "_blank", "noopener,noreferrer");
 }
 $("searchCoverBtn").addEventListener("click", openTitleImageSearch);
 function getCoverTemplateForPlatform(platform) {
@@ -522,8 +585,8 @@ function getCoverTemplateForPlatform(platform) {
   const entry = resolveEntry(category, platform);
   return entry?.coverUrlTemplate || "";
 }
-function makeCoverUrl(template, code, title, platform) {
-  return template.replace(/\$\{serial\}/g, encodeURIComponent(code)).replace(/\$\{code\}/g, encodeURIComponent(code)).replace(/\$\{title\}/g, encodeURIComponent(title)).replace(/\$\{platform\}/g, encodeURIComponent(platform));
+function makeCoverUrl(template, serial, title, platform, region) {
+  return template.replace(/\$\{serial\}/g, encodeURIComponent(serial)).replace(/\$\{title\}/g, encodeURIComponent(title)).replace(/\$\{platform\}/g, encodeURIComponent(platform)).replace(/\$\{region\}/g, encodeURIComponent(region || "")).replace(/\$\{language\}/g, encodeURIComponent(region || ""));
 }
 function probeImage(url) {
   return new Promise(resolve => { const image = new Image(); image.onload = () => resolve(true); image.onerror = () => resolve(false); image.src = url; });
@@ -538,27 +601,31 @@ $("useCoverUrl").addEventListener("click", async () => {
   else showToast("画像を表示できません。画像ファイルのURLか確認してください");
 });
 $("lookupCodeCoverBtn").addEventListener("click", async () => {
-  const title = $("title").value.trim(), platform = $("platform").value.trim();
+  const title = $("title").value.trim(), platform = $("platform").value.trim(), region = $("region").value.trim();
   const codes = [...$("editionCodes").querySelectorAll("[data-code-edition]")].map(input => input.value.trim()).filter(Boolean);
-  const templateForPlatform = getCoverTemplateForPlatform(platform);
-  // Open a window synchronously so the title-search fallback is not blocked after image checks finish.
-  const fallbackTab = window.open("about:blank", "_blank");
-  const fallback = () => {
-    const query = [title, platform, "ゲーム パッケージ 表紙"].filter(Boolean).join(" ");
-    if (fallbackTab && !fallbackTab.closed) fallbackTab.location.href = "https://www.google.com/search?tbm=isch&q=" + encodeURIComponent(query);
-    else openTitleImageSearch();
-    showToast("品番画像が見つからないため、タイトル＋ハードで画像検索を開きました");
-  };
-  if (!title || !platform) { if (fallbackTab) fallbackTab.close(); showToast("先にタイトルとハードを入力してください"); return; }
-  if (!codes.length || !templateForPlatform) { fallback(); return; }
-  for (const code of codes) {
-    const url = makeCoverUrl(templateForPlatform, code, title, platform);
+  const template = getCoverTemplateForPlatform(platform);
+  if (!title || !platform) { showToast("タイトルとハードを入力してください"); return; }
+  if (!template) { showToast("このハードの辞書にジャケットURLテンプレートを設定してください"); return; }
+  const hasSerial = /\$\{serial\}/.test(template);
+  const hasTitle = /\$\{title\}/.test(template);
+  const attempts = [];
+  if (codes.length && hasSerial) codes.forEach(code => attempts.push({ serial: code, label: `品番「${code}」` }));
+  // For platforms whose catalogues do not use product codes (e.g. older cartridge systems),
+  // a title-based URL template can be configured instead.
+  if (hasTitle) attempts.push({ serial: "", label: `タイトル「${title}」` });
+  if (!attempts.length) {
+    showToast(hasSerial ? "品番を入力するか、タイトルを使うURLテンプレートを設定してください" : "URLテンプレートに ${serial} または ${title} を設定してください");
+    return;
+  }
+  for (const attempt of attempts) {
+    const url = makeCoverUrl(template, attempt.serial, title, platform, region);
     if (await probeImage(url)) {
-      applyCoverUrl(url); if (fallbackTab && !fallbackTab.closed) fallbackTab.close();
-      showToast(`品番「${code}」からジャケットを取得しました`); return;
+      applyCoverUrl(url);
+      showToast(`${attempt.label}からジャケットを取得しました`);
+      return;
     }
   }
-  fallback();
+  showToast("ジャケット画像が見つかりませんでした。画像は変更されていません");
 });
 
 function detailFilterTerm(category, value, displayValue = value) {
@@ -580,6 +647,7 @@ function openDetail(id) {
   const image = game.cover ? `<img class="${detailCoverClasses}" src="${game.cover}" alt="${escapeHtml(game.title)}の表ジャケット">` : `<div class="${detailCoverClasses} empty">画像なし</div>`;
   const rows = [];
   if (game.publisher) rows.push(["メーカー", detailFilterTerm("publisher", game.publisher)]);
+  if (game.region) rows.push(["地域", escapeHtml(game.region)]);
   if ((game.editions || []).length) rows.push(["エディション", detailFilterTerms("edition", game.editions)]);
   const codeEntries = Object.entries(game.codes || {}).filter(([, value]) => value);
   const codes = codeEntries.map(([key, value]) => {
@@ -587,7 +655,7 @@ function openDetail(id) {
     return `${label}${detailFilterTerm("code", value)}`;
   }).join(" / ");
   if (codes) rows.push(["品番", codes]);
-  if (game.series) rows.push(["シリーズ", detailFilterTerm("series", game.series)]);
+  if (game.series) rows.push(["シリーズ", detailFilterTerm("series", game.series, seriesDisplayName(game.series))]);
   if ((game.genres || []).length) rows.push(["ジャンル", detailFilterTerms("genre", game.genres)]);
   if (game.releaseDate) rows.push(["発売日", detailFilterTerm("releaseDate", game.releaseDate)]);
   if ((game.tags || []).length) rows.push(["タグ", game.tags.map(detailTagTerm).join(" ")]);
@@ -603,14 +671,14 @@ $("detailContent").addEventListener("click", event => {
   const tagTarget = event.target.closest("[data-detail-search]");
   if (tagTarget) {
     $("searchInput").value = tagTarget.dataset.detailSearch || "";
-    activeFilters = { title: [], platform: [], publisher: [], edition: [], code: [], series: [], genre: [], releaseDate: [], clearStatus: [], preorder: [] };
+    activeFilters = { title: [], platform: [], publisher: [], edition: [], code: [], seriesParent: [], seriesChild: [], genre: [], releaseDate: [], clearStatus: [], preorder: [] };
     $("detailDialog").close(); render(); $("searchInput").focus(); return;
   }
   const filterTarget = event.target.closest("[data-detail-filter]");
   if (!filterTarget) return;
   const category = filterTarget.dataset.detailFilter;
   const value = filterTarget.dataset.filterValue || "";
-  activeFilters = { title: [], platform: [], publisher: [], edition: [], code: [], series: [], genre: [], releaseDate: [], clearStatus: [], preorder: [] };
+  activeFilters = { title: [], platform: [], publisher: [], edition: [], code: [], seriesParent: [], seriesChild: [], genre: [], releaseDate: [], clearStatus: [], preorder: [] };
   if (Object.prototype.hasOwnProperty.call(activeFilters, category)) activeFilters[category] = category === "releaseDate" ? [value, value] : [value];
   $("searchInput").value = "";
   $("detailDialog").close(); render();
@@ -618,7 +686,7 @@ $("detailContent").addEventListener("click", event => {
 $("closeDetail").addEventListener("click", () => $("detailDialog").close());
 $("editGame").addEventListener("click", () => { const game = games.find(item => item.id === activeDetailId); if (!game) return; $("detailDialog").close(); fillForm(game); $("formTitle").textContent = "ゲームを編集"; $("gameDialog").showModal(); });
 function fillForm(game) {
-  resetForm(); $("gameId").value = game.id; $("title").value = game.title || ""; $("platform").value = game.platform || ""; $("publisher").value = game.publisher || ""; $("series").value = game.series || "";
+  resetForm(); $("gameId").value = game.id; $("title").value = game.title || ""; $("platform").value = game.platform || ""; $("publisher").value = game.publisher || ""; $("series").value = game.series || ""; $("region").value = game.region || "";
   $("genres").value = (game.genres || []).join(", "); $("tags").value = (game.tags || []).join(", "); $("notes").value = game.notes || ""; $("clearStatus").value = game.clearStatus === "cleared" ? "cleared" : "unplayed"; $("releaseDate").value = game.releaseDate || ""; $("preorderStatus").checked = game.preorder === true;
   currentCover = game.cover || ""; $("coverUrl").value = /^https?:\/\//i.test(currentCover) ? currentCover : "";
   if (currentCover) { $("coverPreview").src = currentCover; $("coverPreview").hidden = false; $("coverPlaceholder").hidden = true; }
@@ -637,7 +705,7 @@ $("gameForm").addEventListener("submit", async event => {
   if (!title || !platform) { $("formError").textContent = "タイトルとハードを入力してください。"; return; }
   const codes = {}; $("editionCodes").querySelectorAll("[data-code-edition]").forEach(input => { if (input.value.trim()) codes[input.dataset.codeEdition] = input.value.trim(); });
   const id = $("gameId").value || makeId("game"); const old = games.find(game => game.id === id);
-  let item = { id, title, platform, publisher: $("publisher").value.trim(), editions: editionsSelected(), codes, series: $("series").value.trim(), genres: splitList($("genres").value), tags: splitList($("tags").value), notes: $("notes").value.trim(), releaseDate: $("releaseDate").value || "", preorder: $("preorderStatus").checked, clearStatus: $("clearStatus").value === "cleared" ? "cleared" : "unplayed", cover: currentCover, createdAt: old?.createdAt || new Date().toISOString(), updatedAt: new Date().toISOString() };
+  let item = { id, title, platform, publisher: $("publisher").value.trim(), editions: editionsSelected(), codes, region: $("region").value.trim(), series: $("series").value.trim(), genres: splitList($("genres").value), tags: splitList($("tags").value), notes: $("notes").value.trim(), releaseDate: $("releaseDate").value || "", preorder: $("preorderStatus").checked, clearStatus: $("clearStatus").value === "cleared" ? "cleared" : "unplayed", cover: currentCover, createdAt: old?.createdAt || new Date().toISOString(), updatedAt: new Date().toISOString() };
   item = canonicalizeGame(item, true);
   const now = new Date();
   const todayLocal = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}`;
@@ -668,7 +736,8 @@ function renderDictionaryEntries() {
   if (!category.entries.length) { list.innerHTML = '<div class="dict-empty">項目はまだありません。右上の「項目を追加」から登録できます。</div>'; return; }
   list.innerHTML = category.entries.map(item => {
     const uses = entryUseCount(category, item);
-    return `<article class="dict-entry"><div class="dict-entry-text"><strong>${escapeHtml(item.name)}</strong><span class="dict-aliases">別名：${item.aliases.length ? escapeHtml(item.aliases.join("、")) : "なし"}</span><span class="dict-usage">${category.binding ? `ゲームで使用中：${uses}件` : "独立した辞書項目"}</span>${category.id === "hardware" && item.coverUrlTemplate ? '<span class="dict-usage">ジャケットURL設定済み</span>' : ''}</div><div class="dict-entry-actions"><button type="button" class="quiet" data-move-entry="${escapeHtml(item.id)}" data-direction="-1" aria-label="${escapeHtml(item.name)}を上へ" ${category.entries[0]?.id === item.id ? "disabled" : ""}>↑</button><button type="button" class="quiet" data-move-entry="${escapeHtml(item.id)}" data-direction="1" aria-label="${escapeHtml(item.name)}を下へ" ${category.entries.at(-1)?.id === item.id ? "disabled" : ""}>↓</button><button type="button" class="quiet" data-edit-entry="${escapeHtml(item.id)}">編集</button><button type="button" class="quiet" data-delete-entry="${escapeHtml(item.id)}">削除</button></div></article>`;
+    const parent = category.id === "series" ? category.entries.find(entry => entry.id === item.parentId) : null;
+    return `<article class="dict-entry"><div class="dict-entry-text"><strong>${escapeHtml(item.name)}</strong>${parent ? `<span class="dict-usage">親シリーズ：${escapeHtml(parent.name)}</span>` : ""}<span class="dict-aliases">別名：${item.aliases.length ? escapeHtml(item.aliases.join("、")) : "なし"}</span><span class="dict-usage">${category.binding ? `ゲームで使用中：${uses}件` : "独立した辞書項目"}</span>${category.id === "hardware" && item.coverUrlTemplate ? '<span class="dict-usage">ジャケットURL設定済み</span>' : ''}</div><div class="dict-entry-actions"><button type="button" class="quiet" data-move-entry="${escapeHtml(item.id)}" data-direction="-1" aria-label="${escapeHtml(item.name)}を上へ" ${category.entries[0]?.id === item.id ? "disabled" : ""}>↑</button><button type="button" class="quiet" data-move-entry="${escapeHtml(item.id)}" data-direction="1" aria-label="${escapeHtml(item.name)}を下へ" ${category.entries.at(-1)?.id === item.id ? "disabled" : ""}>↓</button><button type="button" class="quiet" data-edit-entry="${escapeHtml(item.id)}">編集</button><button type="button" class="quiet" data-delete-entry="${escapeHtml(item.id)}">削除</button></div></article>`;
   }).join("");
   list.querySelectorAll("[data-edit-entry]").forEach(button => button.addEventListener("click", () => {
     const item = category.entries.find(e => e.id === button.dataset.editEntry); if (item) showDictionaryEntryEditor(item);
@@ -687,12 +756,16 @@ function renderDictionaryEntries() {
 function showDictionaryEntryEditor(item = null) {
   $("dictEntryEditor").hidden = false; $("dictEntryId").value = item?.id || ""; $("dictEditorHeading").textContent = item ? "辞書項目を編集" : "辞書項目を追加";
   $("dictEntryName").value = item?.name || ""; $("dictEntryAliases").value = (item?.aliases || []).join("、"); $("dictEntryError").textContent = "";
-  const isHardware = currentDictionaryCategory()?.id === "hardware";
+  const activeCategory = currentDictionaryCategory();
+  const isHardware = activeCategory?.id === "hardware";
   $("hardwareCoverUrlField").hidden = !isHardware;
   $("dictEntryCoverUrl").value = isHardware ? (item?.coverUrlTemplate || "") : "";
+  const isSeries = activeCategory?.id === "series";
+  $("seriesParentField").hidden = !isSeries;
+  if (isSeries) { const parents = activeCategory.entries.filter(entry => !entry.parentId && entry.id !== item?.id); $("dictEntryParent").innerHTML = `<option value="">なし（親シリーズ）</option>` + parents.map(entry => `<option value="${escapeHtml(entry.id)}" ${entry.id === item?.parentId ? "selected" : ""}>${escapeHtml(entry.name)}</option>`).join(""); }
   $("dictEntryName").focus();
 }
-function hideDictionaryEntryEditor() { $("dictEntryEditor").hidden = true; $("dictEntryId").value = ""; $("dictEntryName").value = ""; $("dictEntryAliases").value = ""; $("dictEntryCoverUrl").value = ""; $("hardwareCoverUrlField").hidden = true; $("dictEntryError").textContent = ""; }
+function hideDictionaryEntryEditor() { $("dictEntryEditor").hidden = true; $("dictEntryId").value = ""; $("dictEntryName").value = ""; $("dictEntryAliases").value = ""; $("dictEntryCoverUrl").value = ""; $("hardwareCoverUrlField").hidden = true; $("seriesParentField").hidden = true; $("dictEntryError").textContent = ""; }
 $("openDictionary").addEventListener("click", () => { renderDictionaryCategories(); $("dictionaryDialog").showModal(); });
 $("closeDictionary").addEventListener("click", () => $("dictionaryDialog").close());
 $("closeDictionaryBottom").addEventListener("click", () => $("dictionaryDialog").close());
@@ -709,13 +782,16 @@ $("saveDictionaryEntry").addEventListener("click", async () => {
   const collision = checkCollision(category, name, aliases, id);
   if (collision) { $("dictEntryError").textContent = `「${collision}」の正式名称または別名と重複しています。別名を修正してください。`; return; }
   const coverUrlTemplate = category.id === "hardware" ? $("dictEntryCoverUrl").value.trim() : (existing?.coverUrlTemplate || "");
-  if (coverUrlTemplate && (!/^https?:\/\//i.test(coverUrlTemplate) || !/\$\{(serial|code|title|platform)\}/.test(coverUrlTemplate))) { $("dictEntryError").textContent = "URLには http(s) と ${serial} などの変数を含めてください。"; return; }
+  const parentId = category.id === "series" ? $("dictEntryParent").value : (existing?.parentId || "");
+  if (category.id === "series" && parentId && parentId === id) { $("dictEntryError").textContent = "自分自身を親シリーズにはできません。"; return; }
+  if (coverUrlTemplate && (!/^https?:\/\//i.test(coverUrlTemplate) || !/\$\{(serial|title)\}/.test(coverUrlTemplate))) { $("dictEntryError").textContent = "URLには http(s) と ${serial}（品番）または ${title}（タイトル）の変数を含めてください。"; return; }
   if (existing) {
     const oldSnapshot = { ...existing, aliases: [...existing.aliases] };
     if (existing.name !== name) replaceEntryReferences(category, oldSnapshot, name);
     existing.name = name; existing.aliases = aliases;
     if (category.id === "hardware") existing.coverUrlTemplate = coverUrlTemplate;
-  } else category.entries.push({ id: makeId("entry"), name, aliases, ...(category.id === "hardware" ? { coverUrlTemplate } : {}) });
+    if (category.id === "series") existing.parentId = parentId;
+  } else category.entries.push({ id: makeId("entry"), name, aliases, ...(category.id === "hardware" ? { coverUrlTemplate } : {}), ...(category.id === "series" ? { parentId } : {}) });
   if (!await persistDictionaries()) return;
   if (!await persist()) return;
   hideDictionaryEntryEditor(); renderDictionaryCategories(); showToast(existing ? "辞書項目を更新しました" : "辞書項目を追加しました");
@@ -810,16 +886,16 @@ function askExportFilename(defaultBase, extension) {
 function csvCell(value) { let text = String(value ?? ""); if (/^[=+\-@]/.test(text)) text = "'" + text; return '"' + text.replace(/"/g, '""') + '"'; }
 function csvText(rows) { return "\ufeff" + rows.map(row => row.map(csvCell).join(",")).join("\r\n"); }
 $("exportCsv").addEventListener("click", () => {
-  const headers = ["title", "platform", "publisher", "editions", "codes", "series", "genres", "tags", "notes", "clearStatus", "releaseDate", "preorder", "coverIncluded", "id"];
-  const rows = [headers, ...games.map(game => [game.title, game.platform, game.publisher, (game.editions || []).join("|"), JSON.stringify(game.codes || {}), game.series, (game.genres || []).join("|"), (game.tags || []).join("|"), game.notes, game.clearStatus || "unplayed", game.releaseDate || "", game.preorder ? "yes" : "no", game.cover ? "yes" : "no", game.id])];
+  const headers = ["title", "platform", "publisher", "editions", "codes", "region", "series", "genres", "tags", "notes", "clearStatus", "releaseDate", "preorder", "coverIncluded", "id"];
+  const rows = [headers, ...games.map(game => [game.title, game.platform, game.publisher, (game.editions || []).join("|"), JSON.stringify(game.codes || {}), game.region || "", game.series, (game.genres || []).join("|"), (game.tags || []).join("|"), game.notes, game.clearStatus || "unplayed", game.releaseDate || "", game.preorder ? "yes" : "no", game.cover ? "yes" : "no", game.id])];
   const filename = askExportFilename("yuuzo-games", ".csv"); if (!filename) return;
   download(filename, csvText(rows), "text/csv;charset=utf-8"); $("dataMessage").textContent = `ゲームCSVを書き出しました（${filename}）。画像本体は含まれません。`;
 });
 $("exportDictionaryCsv").addEventListener("click", () => {
-  const rows = [["category", "categoryId", "entryId", "name", "aliases", "coverUrlTemplate"]];
+  const rows = [["category", "categoryId", "entryId", "name", "aliases", "coverUrlTemplate", "parentName"]];
   dictionaries.categories.forEach(category => {
-    if (!category.entries.length) rows.push([category.name, category.id, "", "", "", ""]);
-    category.entries.forEach(item => rows.push([category.name, category.id, item.id, item.name, item.aliases.join("|"), item.coverUrlTemplate || ""]));
+    if (!category.entries.length) rows.push([category.name, category.id, "", "", "", "", ""]);
+    category.entries.forEach(item => { const parent = category.id === "series" ? category.entries.find(entry => entry.id === item.parentId) : null; rows.push([category.name, category.id, item.id, item.name, item.aliases.join("|"), item.coverUrlTemplate || "", parent?.name || ""]); });
   });
   const filename = askExportFilename("yuuzo-dictionaries", ".csv"); if (!filename) return;
   download(filename, csvText(rows), "text/csv;charset=utf-8"); $("dataMessage").textContent = `辞書CSVを書き出しました（${filename}）。カテゴリ名・正式名称・別名を編集して再読み込みできます。`;
@@ -845,7 +921,7 @@ $("importCsv").addEventListener("change", async event => {
     for (const row of rows) {
       const title = row[idx("title")]?.trim(), platform = row[idx("platform")]?.trim(); if (!title || !platform) continue;
       let codes = {}; try { codes = JSON.parse(row[idx("codes")] || "{}"); } catch (_) { /* Keep empty codes for malformed CSV cells. */ }
-      const item = canonicalizeGame({ id: makeId("game"), title, platform, publisher: row[idx("publisher")] || "", editions: (row[idx("editions")] || "").split("|").filter(Boolean), codes, series: row[idx("series")] || "", genres: (row[idx("genres")] || "").split("|").filter(Boolean), tags: (row[idx("tags")] || "").split("|").filter(Boolean), notes: row[idx("notes")] || "", clearStatus: row[idx("clearStatus")] === "cleared" ? "cleared" : "unplayed", releaseDate: row[idx("releaseDate")] || "", preorder: ["yes", "true", "1"].includes(String(row[idx("preorder")] || "").toLowerCase()), cover: "", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }, true);
+      const item = canonicalizeGame({ id: makeId("game"), title, platform, publisher: row[idx("publisher")] || "", region: (idx("region") >= 0 ? row[idx("region")] : row[idx("language")]) || "", editions: (row[idx("editions")] || "").split("|").filter(Boolean), codes, series: row[idx("series")] || "", genres: (row[idx("genres")] || "").split("|").filter(Boolean), tags: (row[idx("tags")] || "").split("|").filter(Boolean), notes: row[idx("notes")] || "", clearStatus: row[idx("clearStatus")] === "cleared" ? "cleared" : "unplayed", releaseDate: row[idx("releaseDate")] || "", preorder: ["yes", "true", "1"].includes(String(row[idx("preorder")] || "").toLowerCase()), cover: "", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }, true);
       games.push(item); added++;
     }
     await persistDictionaries(); await persist(); $("dataMessage").textContent = `${added}件を追加しました。CSVからは画像を復元できません。`; showToast(`${added}件を読み込みました`);
@@ -853,6 +929,7 @@ $("importCsv").addEventListener("change", async event => {
   event.target.value = "";
 });
 function findOrCreateCategoryByName(name) {
+  if (normalizeName(name) === normalizeName("言語")) return getCategory("region");
   let category = dictionaries.categories.find(c => normalizeName(c.name) === normalizeName(name));
   if (!category) { category = { id: makeId("category"), name: String(name).trim(), binding: null, multiple: false, required: false, builtIn: false, entries: [] }; dictionaries.categories.push(category); }
   return category;
@@ -884,7 +961,16 @@ $("importDictionaryCsv").addEventListener("change", async event => {
         added++;
       }
     }
-    await persistDictionaries(); await persist(); renderDictionaryCategories();
+    const seriesCategory = getCategory("series");
+    if (seriesCategory && idx("parentName") >= 0) {
+      for (const row of rows) {
+        if (normalizeName(row[idx("category")] || "") !== normalizeName(seriesCategory.name)) continue;
+        const childName = (row[idx("name")] || "").trim(), parentName = (row[idx("parentName")] || "").trim();
+        const child = resolveEntry(seriesCategory, childName), parent = resolveEntry(seriesCategory, parentName);
+        if (child) child.parentId = parent && parent.id !== child.id ? parent.id : "";
+      }
+    }
+    await persistDictionaries(); await persist(); renderDictionaryCategories(); updateDatalists();
     $("dataMessage").textContent = `辞書CSVを読み込みました。新規 ${added}件、既存に統合 ${merged}件、重複のためスキップ ${skipped}件。`;
     showToast(`辞書項目を${added + merged}件反映しました`);
   } catch (_) { $("dataMessage").textContent = "辞書CSVを読み込めませんでした。category、name、aliases列を確認してください。"; }
@@ -894,7 +980,8 @@ function mergeDictionaryData(incoming) {
   if (!incoming || !Array.isArray(incoming.categories)) return;
   incoming.categories.forEach(incomingCategory => {
     const name = String(incomingCategory.name || "").trim(); if (!name) return;
-    let category = dictionaries.categories.find(c => c.id === incomingCategory.id);
+    const incomingId = incomingCategory.id === "language" ? "region" : incomingCategory.id;
+    let category = dictionaries.categories.find(c => c.id === incomingId);
     if (!category) category = findOrCreateCategoryByName(name);
     (Array.isArray(incomingCategory.entries) ? incomingCategory.entries : []).forEach(rawEntry => {
       const item = normalizeEntry(rawEntry); if (!item.name) return;
@@ -925,63 +1012,13 @@ $("backupJson").addEventListener("click", async () => {
   download(filename, JSON.stringify(snapshot, null, 2), "application/json");
   $("dataMessage").textContent = `ゲーム情報・ジャケット画像・全マスタ辞書・URLテンプレート・表示設定を含む完全バックアップを書き出しました（${filename}）。検索語と絞り込み状態は含みません。`;
 });
-$("restoreJson").addEventListener("change", async event => {
-  const file = event.target.files?.[0]; if (!file) return;
-  try {
-    const data = JSON.parse(await file.text());
-    if (!Array.isArray(data.games) || (!data.dictionaries && !data.displaySettings)) throw new Error("invalid backup");
-    const isComplete = ["retro-shelf-complete-backup-v5", "retro-shelf-complete-backup-v6"].includes(data.format);
-    const message = isComplete
-      ? `完全バックアップです。ゲーム${data.games.length}件、辞書、表示設定などを含め、現在のデータをバックアップ内容で置き換えます。検索語と絞り込み状態は復元せず、空の状態から開始します。現在のデータは事前にバックアップしましたか？`
-      : `ゲーム${data.games.length}件を現在のコレクションに追加し、含まれている辞書/表示設定を取り込みます。重複するゲームができる可能性があります。続行しますか？`;
-    if (!confirm(message)) { event.target.value = ""; return; }
-
-    if (isComplete) {
-      // Complete backup restore: replace all app state so export/import is a true round trip.
-      games = data.games.map(game => canonicalizeGame({ ...game, id: game.id || makeId("game") }, true));
-      dictionaries = normalizeDictionaries(data.dictionaries);
-      if (data.displaySettings && Array.isArray(data.displaySettings.fields)) {
-        displaySettings = {
-          fields: data.displaySettings.fields.filter(x => ["title","platform","publisher","editions","codes","series","genres","tags","clearStatus","notes"].includes(x)),
-          dimCleared: data.displaySettings.dimCleared !== false,
-          coverBorder: data.displaySettings.coverBorder !== false,
-          coverRounded: data.displaySettings.coverRounded !== false,
-          theme: ["system","light","dark"].includes(data.displaySettings.theme) ? data.displaySettings.theme : "system"
-        };
-      }
-      const view = data.collectionView && typeof data.collectionView === "object" ? data.collectionView : {};
-      activeFilters = { title: [], platform: [], publisher: [], edition: [], code: [], series: [], genre: [], releaseDate: [], clearStatus: [], preorder: [] };
-      $("searchInput").value = "";
-      $("sortSelect").value = ["title-asc", "title-desc", "platform", "series", "release-asc", "release-desc", "recent", "updated"].includes(view.sort) ? view.sort : "title-asc";
-      coverTemplates = Array.isArray(data.coverTemplates) ? data.coverTemplates.map(item => ({ platform: String(item.platform || ""), url: String(item.url || "") })).filter(item => item.platform && item.url) : [];
-      await writeStored(DB_KEY, games);
-      await writeStored(DICTIONARY_KEY, dictionaries);
-      await writeStored(DISPLAY_SETTINGS_KEY, displaySettings);
-      await writeStored(COLLECTION_VIEW_KEY, { sort: $("sortSelect").value });
-      await writeStored(COVER_TEMPLATES_KEY, coverTemplates);
-      renderDisplaySettings(); renderDictionaryCategories(); renderFilterGroups(); render();
-      $("dataMessage").textContent = `完全バックアップからゲーム${games.length}件、辞書、画像、各種設定を復元しました。`;
-    } else {
-      mergeDictionaryData(data.dictionaries);
-      if (data.displaySettings && Array.isArray(data.displaySettings.fields)) displaySettings = { fields: data.displaySettings.fields.filter(x => ["title","platform","publisher","editions","codes","series","genres","tags","clearStatus","notes"].includes(x)), dimCleared: data.displaySettings.dimCleared !== false, coverBorder: data.displaySettings.coverBorder !== false, coverRounded: data.displaySettings.coverRounded !== false, theme: ["system","light","dark"].includes(data.displaySettings.theme) ? data.displaySettings.theme : "system" };
-      await writeStored(DISPLAY_SETTINGS_KEY, displaySettings); renderDisplaySettings();
-      const incoming = data.games.map(game => canonicalizeGame({ ...game, id: makeId("game") }, true));
-      games.push(...incoming);
-      await persistDictionaries(); await persist(); renderDictionaryCategories();
-      $("dataMessage").textContent = `${incoming.length}件のゲームと辞書データを追加しました。`;
-    }
-    showToast("バックアップを復元しました");
-  } catch (_) { $("dataMessage").textContent = "バックアップを読み込めませんでした。ファイル形式または内容を確認してください。"; }
-  event.target.value = "";
-});
-
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) navigator.serviceWorker.register("./sw.js").catch(() => {});
 (async function initialize() {
   games = await loadGames();
   const storedView = await readStored(COLLECTION_VIEW_KEY, null);
   // Search and filter choices are temporary and always reset at launch; keep sort only.
   $("searchInput").value = "";
-  activeFilters = { title: [], platform: [], publisher: [], edition: [], code: [], series: [], genre: [], releaseDate: [], clearStatus: [], preorder: [] };
+  activeFilters = { title: [], platform: [], publisher: [], edition: [], code: [], seriesParent: [], seriesChild: [], genre: [], releaseDate: [], clearStatus: [], preorder: [] };
   if (storedView && typeof storedView === "object" && ["title-asc", "title-desc", "platform", "series", "release-asc", "release-desc", "recent", "updated"].includes(storedView.sort)) $("sortSelect").value = storedView.sort;
   await writeStored(COLLECTION_VIEW_KEY, { sort: $("sortSelect").value || "title-asc" });
   const storedDictionaries = await readStored(DICTIONARY_KEY, null);
@@ -994,7 +1031,7 @@ if ("serviceWorker" in navigator && location.protocol.startsWith("http")) naviga
     await writeStored(COVER_TEMPLATES_KEY, []);
   }
   const storedDisplay = await readStored(DISPLAY_SETTINGS_KEY, null);
-  if (storedDisplay && Array.isArray(storedDisplay.fields)) displaySettings = { fields: storedDisplay.fields.filter(x => ["title","platform","publisher","editions","codes","series","genres","tags","clearStatus","notes"].includes(x)), dimCleared: storedDisplay.dimCleared !== false, coverBorder: storedDisplay.coverBorder !== false, coverRounded: storedDisplay.coverRounded !== false, theme: ["system","light","dark"].includes(storedDisplay.theme) ? storedDisplay.theme : "system" };
+  if (storedDisplay && Array.isArray(storedDisplay.fields)) displaySettings = { fields: storedDisplay.fields.map(x => x === "language" ? "region" : x).filter(x => ["title","platform","publisher","editions","codes","series","region","genres","tags","clearStatus","notes"].includes(x)), dimCleared: storedDisplay.dimCleared !== false, coverBorder: storedDisplay.coverBorder !== false, coverRounded: storedDisplay.coverRounded !== false, theme: ["system","light","dark"].includes(storedDisplay.theme) ? storedDisplay.theme : "system" };
   renderDisplaySettings();
   try { mergeLegacySeriesAliases(JSON.parse(localStorage.getItem("retro-shelf-series-aliases") || "{}")); } catch (_) { /* No legacy series alias data. */ }
   games.forEach(game => canonicalizeGame(game, true));

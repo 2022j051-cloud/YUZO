@@ -12,19 +12,19 @@
 </head>
 <body>
 <header class="topbar">
-  <div><div class="eyebrow">Y U Z O</div><h1>遊蔵</h1></div>
+  <div><div class="eyebrow">MY GAME COLLECTION</div><h1>遊蔵</h1></div>
   <button id="settingsBtn" class="quiet">データ管理</button>
 </header>
 <main>
   <section class="summary">
     <div class="summary-stat"><span id="gameCountLabel">所持タイトル数</span><strong id="gameCount">0</strong></div>
-    <div class="hardware-summary"><span class="summary-label">ハード別所持タイトル数</span><div id="hardwareCounts" class="hardware-counts"></div></div>
+    <div class="hardware-summary"><span class="summary-label">ハード別所持タイトル数（タップで絞り込み）</span><div id="hardwareCounts" class="hardware-counts"></div></div>
     <button id="addBtn" class="primary">＋ 登録</button>
   </section>
   <div class="section-head collection-tools">
     <div class="collection-heading"><h2>コレクション</h2><span id="visibleCount" class="result-count">0タイトル表示中</span></div>
-    <input id="searchInput" class="search-input" type="search" placeholder="検索" aria-label="コレクションを検索">
-    <div class="collection-actions"><button id="filterBtn" type="button" class="secondary">絞り込み <span id="filterBadge" hidden>0</span></button><label class="sort-label"><span class="sr-only">並び替え</span><select id="sortSelect" aria-label="並び替え"><option value="title-asc">タイトル順（昇順）</option><option value="title-desc">タイトル順（降順）</option><option value="platform">ハード順</option><option value="series">シリーズ順</option><option value="release-asc">発売日が早い順</option><option value="release-desc">発売日が遅い順</option></select></label></div>
+    <input id="searchInput" class="search-input" type="search" placeholder="タイトル・ハード・メーカーなどを検索" aria-label="コレクションを検索">
+    <div class="collection-actions"><button id="filterBtn" type="button" class="secondary">絞り込み <span id="filterBadge" hidden>0</span></button><label class="sort-label"><span class="sr-only">並び替え</span><select id="sortSelect" aria-label="並び替え"><option value="title-asc">タイトル順（あ→ん）</option><option value="title-desc">タイトル順（ん→あ）</option><option value="platform">ハード順（辞書順）</option><option value="series">シリーズ順（辞書順）</option><option value="release-asc">発売日が早い順</option><option value="release-desc">発売日が遅い順</option></select></label></div>
   </div>
   <p id="emptyHint" class="muted empty-hint" hidden></p>
   <section id="gameGrid" class="game-grid"></section>
@@ -40,29 +40,25 @@
       <input id="coverInput" type="file" accept="image/*" hidden>
     </label>
     <div class="field cover-tools">
-      <label>ネットからジャケットを探す</label>
+      <label>ジャケット画像</label>
       <div class="inline-add"><button type="button" id="lookupCodeCoverBtn" class="primary">品番からジャケット取得</button><button type="button" id="searchCoverBtn" class="secondary">タイトル＋ハードで画像検索</button></div>
-      <small class="muted">登録済みのハード別URLテンプレートに品番を埋め込みます。画像が見つからない場合のみ、タイトル＋ハードで画像検索を開きます。</small>
+      <small class="muted">品番取得はハードに設定したURLテンプレートを使います。見つからない場合は「タイトル＋ハードで画像検索」も利用できます。</small>
       <div class="inline-add"><input id="coverUrl" type="url" placeholder="https://... 画像URLを貼り付け"><button type="button" id="useCoverUrl" class="secondary">URLを適用</button></div>
       <small class="muted">URL画像はネット接続が必要です。長期保存・オフライン利用には画像ファイルとして保存して登録するのがおすすめです。</small>
     </div>
-    <div class="field"><label for="title">タイトル <em>*</em></label><input id="title" required maxlength="180" placeholder></div>
+    <div class="field"><label for="title">タイトル <em>*</em></label><input id="title" required maxlength="180"></div>
     <div class="two-col">
-      <div class="field"><label for="platform">ハード <em>*</em></label><input id="platform" required list="platformOptions" placeholder=><datalist id="platformOptions"><option>ファミコン</option><option>スーパーファミコン</option><option>ゲームボーイ</option><option>ゲームボーイアドバンス</option><option>Nintendo 64</option><option>ニンテンドーDS</option><option>メガドライブ</option><option>セガサターン</option><option>ドリームキャスト</option><option>PlayStation</option><option>PlayStation 2</option><option>PCエンジン</option></datalist></div>
-      <div class="field"><label for="publisher">メーカー</label><input id="publisher" list="publisherOptions" placeholder=><datalist id="publisherOptions"></datalist><small class="muted"></small></div>
+      <div class="field"><label for="platform">ハード <em>*</em></label><input id="platform" required autocomplete="off"><div id="platformSuggestions" class="autocomplete-suggestions" hidden></div></div>
+      <div class="field"><label for="publisher">メーカー</label><input id="publisher" autocomplete="off"><div id="publisherSuggestions" class="autocomplete-suggestions" hidden></div></div>
     </div>
-    <div class="field"><label>所持エディション（複数選択可）</label><div id="editionOptions" class="chips">
-      <label class="chip"><input type="checkbox" value="通常版">通常版</label>
-      <label class="chip"><input type="checkbox" value="ソフトのみ">ソフトのみ</label>
-      <label class="chip"><input type="checkbox" value="BEST版">BEST版</label>
-      <label class="chip"><input type="checkbox" value="廉価版">廉価版</label>
-    </div><div class="inline-add"><input id="customEdition" placeholder="エディションを追加"><button type="button" id="addEditionBtn" class="secondary">追加</button></div></div>
-    <div class="field"><label>品番</label><div id="editionCodes" class="edition-codes"><small class="muted">エディションを選択すると入力欄が表示されます。</small></div></div>
-    <div class="field"><label for="series">シリーズ</label><input id="series" list="seriesOptions" placeholder=><datalist id="seriesOptions"></datalist><small class="muted"></small></div>
-    <div class="field"><label for="genres">ジャンル</label><input id="genres" list="genreOptions" placeholder><datalist id="genreOptions"></datalist><small class="muted">「,」で区切ります。</small></div>
-    <div class="field"><label for="tags">タグ</label><input id="tags" list="tagOptions" placeholder><datalist id="tagOptions"></datalist><small class="muted">「,」で区切る。</small></div>
+    <div class="field"><label>所持エディション（複数選択可）</label><div id="editionOptions" class="chips"></div><div class="inline-add"><input id="customEdition" placeholder="独自のエディションを追加"><button type="button" id="addEditionBtn" class="secondary">追加</button></div></div>
+    <div class="field"><label>品番（エディションごと）</label><div id="editionCodes" class="edition-codes"><small class="muted">エディションを選択すると入力欄が表示されます。</small></div></div>
+    <div class="field"><label for="region">地域</label><input id="region" list="regionOptions" placeholder="JA / US など"><datalist id="regionOptions"></datalist><small class="muted">例：JA、US、EU。画像URLでは ${region} として利用できます。</small></div>
+    <div class="field"><label for="series">シリーズ</label><input id="series" autocomplete="off"><div id="seriesSuggestions" class="autocomplete-suggestions" hidden></div></div>
+    <div class="field"><label for="genres">ジャンル（複数可）</label><input id="genres" autocomplete="off"><div id="genreSuggestions" class="autocomplete-suggestions" hidden></div><small class="muted">「、」で区切って複数登録できます。</small></div>
+    <div class="field"><label for="tags">自由タグ</label><input id="tags" autocomplete="off"><div id="tagSuggestions" class="autocomplete-suggestions" hidden></div><small class="muted">「、」で区切って複数登録できます。</small></div>
     <div class="two-col status-row"><div class="field"><label for="releaseDate">発売日</label><input id="releaseDate" type="date"></div><div class="field status-control" id="clearStatusField"><label for="clearStatus">クリア状況</label><select id="clearStatus"><option value="unplayed">未クリア</option><option value="cleared">クリア済み</option></select></div><div class="field status-control" id="preorderStatusField" hidden><label for="preorderStatus">予約状況</label><label class="setting-toggle preorder-toggle"><input id="preorderStatus" type="checkbox"> 予約済み</label></div></div>
-    <div class="field"><label for="notes">メモ</label><textarea id="notes" rows="2" placeholder=></textarea></div>
+    <div class="field"><label for="notes">メモ</label><textarea id="notes" rows="2"></textarea></div>
     <div class="form-actions"><button type="button" id="cancelGame" class="secondary">キャンセル</button><button class="primary" type="submit">保存する</button></div>
     <p id="formError" class="error" role="alert"></p>
   </form>
@@ -76,14 +72,14 @@
 
 <dialog id="filterDialog">
   <div class="dialog-head"><div><div class="eyebrow">COLLECTION FILTER</div><h2>コレクションを絞り込む</h2></div><button type="button" id="closeFilter" class="icon-btn" aria-label="閉じる">✕</button></div>
-  <p class="small muted"></p>
+  <p class="small muted">各項目内は複数選択できます。異なる項目を組み合わせると、すべての条件に一致するタイトルだけが表示されます。</p>
   <div id="filterGroups" class="filter-groups"></div>
   <div class="form-actions filter-actions"><button type="button" id="clearFilters" class="secondary">条件をクリア</button><button type="button" id="applyFilters" class="primary">絞り込みを適用</button></div>
 </dialog>
 
 <dialog id="settingsDialog">
   <div class="dialog-head"><div><div class="eyebrow">DATA TOOLS</div><h2>データ管理</h2></div><button id="closeSettings" class="icon-btn" aria-label="閉じる">✕</button></div>
-  <p class="muted">データはこのブラウザ内に保存されます。定期的にバックアップしてください。</p>
+  <p class="muted">データはこのブラウザ内に保存されます。端末変更やブラウザのデータ消去に備えて、定期的にバックアップしてください。</p>
   <div class="field dictionary-launch">
     <label>マスタ辞書</label>
     <p class="small muted">ハード・メーカー・シリーズ・ジャンルなどを正式名称と別名で管理します。辞書の種類も自由に追加できます。</p>
@@ -91,7 +87,7 @@
   </div>
   <section class="field display-settings">
     <label>ゲーム一覧・詳細に表示する項目</label>
-    <p class="small muted">チェックした項目だけを表示します。</p>
+    <p class="small muted">チェックした項目だけを表示します。タイトルとハード名は常に表示されます。</p>
     <div id="displayFields" class="display-fields">
       <label><input type="checkbox" value="title" checked> タイトル</label>
       <label><input type="checkbox" value="platform" checked> ハード</label>
@@ -99,6 +95,7 @@
       <label><input type="checkbox" value="editions" checked> エディション</label>
       <label><input type="checkbox" value="codes"> 品番</label>
       <label><input type="checkbox" value="series"> シリーズ</label>
+      <label><input type="checkbox" value="region" checked> 地域</label>
       <label><input type="checkbox" value="genres"> ジャンル</label>
       <label><input type="checkbox" value="tags"> タグ</label>
       <label><input type="checkbox" value="clearStatus" checked> クリア状況</label>
@@ -107,7 +104,7 @@
     <label class="setting-toggle"><input id="dimClearedGames" type="checkbox" checked> クリア済みタイトルを薄く表示する</label>
     <label class="setting-toggle"><input id="coverBorderSetting" type="checkbox" checked> ジャケット画像に枠線を表示する</label>
     <label class="setting-toggle"><input id="coverRoundedSetting" type="checkbox" checked> ジャケット画像の角を丸くする</label>
-    <div class="field theme-setting"><label for="themeSetting">配色</label><select id="themeSetting"><option value="system">端末に合わせる</option><option value="light">ホワイトモード</option><option value="dark">ブラックモード</option></select><small class="muted"></small></div>
+    <div class="field theme-setting"><label for="themeSetting">配色</label><select id="themeSetting"><option value="system">端末に合わせる</option><option value="light">ホワイトモード</option><option value="dark">ブラックモード</option></select><small class="muted">端末に合わせる場合、OSやブラウザの配色設定に追従します。</small></div>
     <div class="form-actions"><button type="button" id="saveDisplaySettings" class="primary">表示設定を保存</button></div>
   </section>
   <div class="data-actions">
@@ -116,9 +113,8 @@
     <button id="exportDictionaryCsv" class="secondary">辞書をCSV出力</button>
     <label class="button secondary">辞書CSVを読み込む<input id="importDictionaryCsv" type="file" accept=".csv,text/csv" hidden></label>
     <button id="backupJson" class="secondary">完全バックアップ（.yuzo）</button>
-    <label class="button secondary">バックアップを復元<input id="restoreJson" type="file" accept=".yuzo,.rshelf,.json,application/json" hidden></label>
   </div>
-  <p class="small muted">ゲームCSVと辞書CSVは別々に扱えます。画像・ゲーム情報・全辞書・設定をまとめた完全バックアップは .yuzo 形式で保存します。</p>
+  <p class="small muted">ゲームCSVと辞書CSVは別々に扱えます。画像・ゲーム情報・全辞書・設定をまとめた完全バックアップは .yuzo 形式で書き出せます。</p>
   <div class="form-actions"><button id="closeSettingsBottom" class="primary">閉じる</button></div>
   <p id="dataMessage" role="status" class="message"></p>
 </dialog>
@@ -132,7 +128,7 @@
   </div>
   <div class="field dict-new-category">
     <label for="newDictionaryCategory">辞書の種類を追加</label>
-    <div class="inline-add"><input id="newDictionaryCategory" placeholder="例：地域、販売形態、言語など"><button type="button" id="addDictionaryCategory" class="secondary">種類を追加</button></div>
+    <div class="inline-add"><input id="newDictionaryCategory" placeholder="例：販売形態など"><button type="button" id="addDictionaryCategory" class="secondary">種類を追加</button></div>
   </div>
   <div class="dict-list-head"><div><h3>登録項目</h3><p class="small muted">同じ項目に別名をいくつでも登録できます。</p></div><button type="button" id="newDictionaryEntry" class="primary">＋ 項目を追加</button></div>
   <div id="dictEntryList" class="dict-entry-list"></div>
@@ -141,7 +137,8 @@
     <input id="dictEntryId" type="hidden">
     <div class="field"><label for="dictEntryName">正式名称（表示名）</label><input id="dictEntryName" maxlength="160" placeholder="例：ファイナルファンタジー"></div>
     <div class="field"><label for="dictEntryAliases">別名・表記ゆれ</label><textarea id="dictEntryAliases" rows="3" placeholder="例：FF、Final Fantasy（「、」または改行で区切る）"></textarea><p class="small muted">別名は検索・入力時に正式名称へ統一されます。別名同士も重複しないように登録してください。</p></div>
-    <div class="field" id="hardwareCoverUrlField" hidden><label for="dictEntryCoverUrl">品番からジャケットを取得するURLテンプレート</label><input id="dictEntryCoverUrl" type="url" placeholder="https://.../${serial}.jpg"><p class="small muted">このハードの辞書項目に保存します。変数：${serial} / ${code} / ${title} / ${platform}</p></div>
+    <div class="field" id="hardwareCoverUrlField" hidden><label for="dictEntryCoverUrl">品番からジャケットを取得するURLテンプレート</label><input id="dictEntryCoverUrl" type="url" placeholder="https://.../${serial}.jpg"><p class="small muted">変数：${serial}（品番）、${title}（タイトル）、${platform}（ハード）、${region}（地域コード：JA、USなど）。品番がない場合は ${title} を使うテンプレートも設定できます。</p></div>
+    <div class="field" id="seriesParentField" hidden><label for="dictEntryParent">親シリーズ（任意）</label><select id="dictEntryParent"><option value="">なし（親シリーズ）</option></select><p class="small muted">例：親「マリオ」、子「マリオカート」。親子2階層で管理できます。</p></div>
     <p id="dictEntryError" class="error" role="alert"></p>
     <div class="form-actions"><button type="button" id="cancelDictionaryEntry" class="secondary">キャンセル</button><button type="button" id="saveDictionaryEntry" class="primary">保存</button></div>
   </section>
