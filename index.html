@@ -42,7 +42,7 @@
     <div class="field cover-tools">
       <label>ジャケット画像</label>
       <div class="inline-add"><button type="button" id="lookupCodeCoverBtn" class="primary">品番からジャケット取得</button><button type="button" id="searchCoverBtn" class="secondary">タイトル＋ハードで画像検索</button></div>
-      <small class="muted">品番取得はハードに設定したURLテンプレートを使います。見つからない場合は「タイトル＋ハードで画像検索」も利用できます。</small>
+      <small class="muted">Wii・GameCubeはGameTDBの作品データをオンライン照合し、カバー画像を取得します。その他のハードは辞書に設定したURLテンプレートを使います。見つからない場合は「タイトル＋ハードで画像検索」も利用できます。</small>
       <div class="inline-add"><input id="coverUrl" type="url" placeholder="https://... 画像URLを貼り付け"><button type="button" id="useCoverUrl" class="secondary">URLを適用</button></div>
       <small class="muted">URL画像はネット接続が必要です。長期保存・オフライン利用には画像ファイルとして保存して登録するのがおすすめです。</small>
     </div>
@@ -52,7 +52,7 @@
       <div class="field"><label for="publisher">メーカー</label><input id="publisher" autocomplete="off"><div id="publisherSuggestions" class="autocomplete-suggestions" hidden></div></div>
     </div>
     <div class="field"><label>所持エディション（複数選択可）</label><div id="editionOptions" class="chips"></div><div class="inline-add"><input id="customEdition" placeholder="独自のエディションを追加"><button type="button" id="addEditionBtn" class="secondary">追加</button></div></div>
-    <div class="field"><label>品番（エディションごと）</label><div id="editionCodes" class="edition-codes"><small class="muted">エディションを選択すると入力欄が表示されます。</small></div></div>
+    <div class="field"><label>品番（エディションごと）</label><div id="editionCodes" class="edition-codes"><small class="muted">エディションを選択すると入力欄が表示されます。</small></div><small id="wiiCodeHelp" class="muted" hidden>Wiiの品番は「RVL-P-SMNJ(JPN)」の形式で扱います。中央4文字を入力し、地域を設定してください。各エディションの「カメラ/OCR」からパッケージを撮影・読み取りできます。</small><input id="codeOcrInput" type="file" accept="image/*" capture="environment" hidden></div>
     <div class="field"><label for="region">地域</label><input id="region" list="regionOptions" placeholder="JA / US など"><datalist id="regionOptions"></datalist><small class="muted">例：JA、US、EU。画像URLでは ${region} として利用できます。</small></div>
     <div class="field"><label for="series">シリーズ</label><input id="series" autocomplete="off"><div id="seriesSuggestions" class="autocomplete-suggestions" hidden></div></div>
     <div class="field"><label for="genres">ジャンル（複数可）</label><input id="genres" autocomplete="off"><div id="genreSuggestions" class="autocomplete-suggestions" hidden></div><small class="muted">「、」で区切って複数登録できます。</small></div>
@@ -62,6 +62,14 @@
     <div class="form-actions"><button type="button" id="cancelGame" class="secondary">キャンセル</button><button class="primary" type="submit">保存する</button></div>
     <p id="formError" class="error" role="alert"></p>
   </form>
+</dialog>
+
+<dialog id="codeOcrDialog">
+  <div class="dialog-head"><div><div class="eyebrow">PACKAGE CODE OCR</div><h2>読み取り結果を確認</h2></div><button type="button" id="closeCodeOcr" class="icon-btn" aria-label="閉じる">✕</button></div>
+  <p class="small muted">OCRの結果は誤読することがあります。パッケージの表記と照らし合わせて修正してください。</p>
+  <div class="field"><label for="ocrCodeValue">品番として登録する文字列</label><input id="ocrCodeValue" autocomplete="off" placeholder="RVL-P-SMNJ(JPN)"></div>
+  <div class="field"><label for="ocrRawText">画像から読み取った全文（確認用）</label><textarea id="ocrRawText" rows="5"></textarea></div>
+  <div class="form-actions"><button type="button" id="cancelCodeOcr" class="secondary">キャンセル</button><button type="button" id="applyCodeOcr" class="primary">品番に反映</button></div>
 </dialog>
 
 <dialog id="detailDialog">
@@ -112,9 +120,10 @@
     <label class="button secondary">ゲームCSVを読み込む<input id="importCsv" type="file" accept=".csv,text/csv" hidden></label>
     <button id="exportDictionaryCsv" class="secondary">辞書をCSV出力</button>
     <label class="button secondary">辞書CSVを読み込む<input id="importDictionaryCsv" type="file" accept=".csv,text/csv" hidden></label>
-    <button id="backupJson" class="secondary">完全バックアップ（.yuzo）</button>
+    <button id="backupJson" class="secondary">完全バックアップを書き出す（.yuzo）</button>
+    <label class="button secondary">完全バックアップから復元<input id="restoreBackup" type="file" accept=".yuzo,.json,application/json" hidden></label>
   </div>
-  <p class="small muted">ゲームCSVと辞書CSVは別々に扱えます。画像・ゲーム情報・全辞書・設定をまとめた完全バックアップは .yuzo 形式で書き出せます。</p>
+  <p class="small muted">完全バックアップ（.yuzo）にはゲーム情報・画像・全辞書・URLテンプレート・表示設定が含まれます。復元すると、現在このブラウザに保存されているデータはバックアップの内容に置き換わります。復元前に現在のデータもバックアップしてください。</p>
   <div class="form-actions"><button id="closeSettingsBottom" class="primary">閉じる</button></div>
   <p id="dataMessage" role="status" class="message"></p>
 </dialog>
@@ -137,7 +146,7 @@
     <input id="dictEntryId" type="hidden">
     <div class="field"><label for="dictEntryName">正式名称（表示名）</label><input id="dictEntryName" maxlength="160" placeholder="例：ファイナルファンタジー"></div>
     <div class="field"><label for="dictEntryAliases">別名・表記ゆれ</label><textarea id="dictEntryAliases" rows="3" placeholder="例：FF、Final Fantasy（「、」または改行で区切る）"></textarea><p class="small muted">別名は検索・入力時に正式名称へ統一されます。別名同士も重複しないように登録してください。</p></div>
-    <div class="field" id="hardwareCoverUrlField" hidden><label for="dictEntryCoverUrl">品番からジャケットを取得するURLテンプレート</label><input id="dictEntryCoverUrl" type="url" placeholder="https://.../${serial}.jpg"><p class="small muted">変数：${serial}（品番）、${title}（タイトル）、${platform}（ハード）、${region}（地域コード：JA、USなど）。品番がない場合は ${title} を使うテンプレートも設定できます。</p></div>
+    <div class="field" id="hardwareCoverUrlField" hidden><label for="dictEntryCoverUrl">品番からジャケットを取得するURLテンプレート</label><input id="dictEntryCoverUrl" type="url" placeholder="https://.../${serial}.jpg"><p class="small muted">変数：${serial}（品番）、${title}（タイトル）、${platform}（ハード）、${region}（地域コード：JA、USなど）。</p></div>
     <div class="field" id="seriesParentField" hidden><label for="dictEntryParent">親シリーズ（任意）</label><select id="dictEntryParent"><option value="">なし（親シリーズ）</option></select><p class="small muted">例：親「マリオ」、子「マリオカート」。親子2階層で管理できます。</p></div>
     <p id="dictEntryError" class="error" role="alert"></p>
     <div class="form-actions"><button type="button" id="cancelDictionaryEntry" class="secondary">キャンセル</button><button type="button" id="saveDictionaryEntry" class="primary">保存</button></div>

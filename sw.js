@@ -1,4 +1,4 @@
-const CACHE="yuzo-cache-v25";
+const CACHE="yuzo-cache-v28";
 const FILES=["./","./index.html","./styles.css","./app.js","./manifest.json"];
 self.addEventListener("install",e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(FILES))));
 self.addEventListener("activate",e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k))))));
