@@ -42,9 +42,10 @@
     <div class="field cover-tools">
       <label>ジャケット画像</label>
       <div class="inline-add"><button type="button" id="lookupCodeCoverBtn" class="primary">品番からジャケット取得</button><button type="button" id="searchCoverBtn" class="secondary">タイトル＋ハードで画像検索</button></div>
-      <small class="muted">Wii・GameCubeはGameTDBの作品データをオンライン照合し、カバー画像を取得します。その他のハードは辞書に設定したURLテンプレートを使います。見つからない場合は「タイトル＋ハードで画像検索」も利用できます。</small>
+      <small class="muted">Wii・GameCubeはハード別のタイトルデータを照合してゲームIDを特定し、GameTDBのカバー画像を取得します。取得先と照合過程は「取得元・直近の照合ログ」で確認できます。その他のハードは辞書に設定したURLテンプレートを使います。見つからない場合は「タイトル＋ハードで画像検索」も利用できます。</small>
       <div class="inline-add"><input id="coverUrl" type="url" placeholder="https://... 画像URLを貼り付け"><button type="button" id="useCoverUrl" class="secondary">URLを適用</button></div>
       <small class="muted">URL画像はネット接続が必要です。長期保存・オフライン利用には画像ファイルとして保存して登録するのがおすすめです。</small>
+      <details class="cover-lookup-details"><summary>取得元・直近の照合ログ</summary><pre id="coverLookupLog">取得ログはまだありません。</pre></details>
     </div>
     <div class="field"><label for="title">タイトル <em>*</em></label><input id="title" required maxlength="180"></div>
     <div class="two-col">
@@ -52,7 +53,7 @@
       <div class="field"><label for="publisher">メーカー</label><input id="publisher" autocomplete="off"><div id="publisherSuggestions" class="autocomplete-suggestions" hidden></div></div>
     </div>
     <div class="field"><label>所持エディション（複数選択可）</label><div id="editionOptions" class="chips"></div><div class="inline-add"><input id="customEdition" placeholder="独自のエディションを追加"><button type="button" id="addEditionBtn" class="secondary">追加</button></div></div>
-    <div class="field"><label>品番（エディションごと）</label><div id="editionCodes" class="edition-codes"><small class="muted">エディションを選択すると入力欄が表示されます。</small></div><small id="wiiCodeHelp" class="muted" hidden>Wiiの品番は「RVL-P-SMNJ(JPN)」の形式で扱います。中央4文字を入力し、地域を設定してください。各エディションの「カメラ/OCR」からパッケージを撮影・読み取りできます。</small><input id="codeOcrInput" type="file" accept="image/*" capture="environment" hidden></div>
+    <div class="field"><label>品番（エディションごと）</label><div id="editionCodes" class="edition-codes"><small class="muted">エディションを選択すると入力欄が表示されます。</small></div><small id="wiiCodeHelp" class="muted" hidden>Wiiの品番は「RVL-P-SMNJ(JPN)」など、実物の表記を基準に扱います。地域表記は固定せず、パッケージから読み取った値を反映します。</small><input id="codeOcrInput" type="file" accept="image/*" capture="environment" hidden></div>
     <div class="field"><label for="region">地域</label><input id="region" list="regionOptions" placeholder="JA / US など"><datalist id="regionOptions"></datalist><small class="muted">例：JA、US、EU。画像URLでは ${region} として利用できます。</small></div>
     <div class="field"><label for="series">シリーズ</label><input id="series" autocomplete="off"><div id="seriesSuggestions" class="autocomplete-suggestions" hidden></div></div>
     <div class="field"><label for="genres">ジャンル（複数可）</label><input id="genres" autocomplete="off"><div id="genreSuggestions" class="autocomplete-suggestions" hidden></div><small class="muted">「、」で区切って複数登録できます。</small></div>
@@ -64,12 +65,19 @@
   </form>
 </dialog>
 
-<dialog id="codeOcrDialog">
-  <div class="dialog-head"><div><div class="eyebrow">PACKAGE CODE OCR</div><h2>読み取り結果を確認</h2></div><button type="button" id="closeCodeOcr" class="icon-btn" aria-label="閉じる">✕</button></div>
-  <p class="small muted">OCRの結果は誤読することがあります。パッケージの表記と照らし合わせて修正してください。</p>
-  <div class="field"><label for="ocrCodeValue">品番として登録する文字列</label><input id="ocrCodeValue" autocomplete="off" placeholder="RVL-P-SMNJ(JPN)"></div>
-  <div class="field"><label for="ocrRawText">画像から読み取った全文（確認用）</label><textarea id="ocrRawText" rows="5"></textarea></div>
-  <div class="form-actions"><button type="button" id="cancelCodeOcr" class="secondary">キャンセル</button><button type="button" id="applyCodeOcr" class="primary">品番に反映</button></div>
+<dialog id="codeOcrDialog" class="ocr-dialog">
+  <div class="dialog-head"><div><div class="eyebrow">PACKAGE CODE SCANNER</div><h2>品番をスキャン</h2></div><button type="button" id="closeCodeOcr" class="icon-btn" aria-label="閉じる">✕</button></div>
+  <p class="small muted">品番全体を映してください。検出した品番が映像上に表示されます。正しければ、その表示をタップして確定できます。</p>
+  <div class="ocr-camera-stage">
+    <video id="ocrVideo" autoplay muted playsinline></video>
+    <div class="ocr-guide-frame" aria-hidden="true"><span>品番をこの枠に</span></div>
+    <div id="ocrCandidates" class="ocr-candidates ocr-candidates-overlay" aria-live="polite"></div>
+  </div>
+  <p id="ocrScanStatus" class="small muted" role="status">カメラを起動しています…</p>
+  <div class="inline-add ocr-fallback-actions"><button type="button" id="ocrManualScan" class="secondary" disabled>今の映像を再スキャン</button><button type="button" id="ocrChooseImage" class="secondary">画像から読み取る</button></div>
+  <details class="ocr-debug"><summary>OCRが読み取った文字（確認用）</summary><textarea id="ocrRawText" rows="4" readonly></textarea></details>
+  <canvas id="ocrCanvas" hidden></canvas>
+  <div class="form-actions"><button type="button" id="cancelCodeOcr" class="secondary">キャンセル</button></div>
 </dialog>
 
 <dialog id="detailDialog">
@@ -146,7 +154,17 @@
     <input id="dictEntryId" type="hidden">
     <div class="field"><label for="dictEntryName">正式名称（表示名）</label><input id="dictEntryName" maxlength="160" placeholder="例：ファイナルファンタジー"></div>
     <div class="field"><label for="dictEntryAliases">別名・表記ゆれ</label><textarea id="dictEntryAliases" rows="3" placeholder="例：FF、Final Fantasy（「、」または改行で区切る）"></textarea><p class="small muted">別名は検索・入力時に正式名称へ統一されます。別名同士も重複しないように登録してください。</p></div>
-    <div class="field" id="hardwareCoverUrlField" hidden><label for="dictEntryCoverUrl">品番からジャケットを取得するURLテンプレート</label><input id="dictEntryCoverUrl" type="url" placeholder="https://.../${serial}.jpg"><p class="small muted">変数：${serial}（品番）、${title}（タイトル）、${platform}（ハード）、${region}（地域コード：JA、USなど）。</p></div>
+    <div class="field hardware-config-fields" id="hardwareCoverUrlField" hidden>
+      <label for="dictEntryCoverProvider">オンライン取得方式</label>
+      <select id="dictEntryCoverProvider"><option value="">独自URLテンプレート</option><option value="gametdb-wii">GameTDB / Wii</option><option value="gametdb-gc">GameTDB / GameCube</option></select>
+      <p id="hardwareProviderHelp" class="small muted"></p>
+      <label for="dictEntryTitleDataUrls">タイトルデータURL（1行に1つ）</label>
+      <textarea id="dictEntryTitleDataUrls" rows="4" placeholder="https://example.org/game-titles.txt"></textarea>
+      <p class="small muted">対応形式は「6文字ID = タイトル」のテキストと、name / serial を含むDAT形式です。WiiとGameCubeは別の初期URLが設定されています。</p>
+      <label for="dictEntryCoverUrl">カバー画像URLテンプレート</label>
+      <input id="dictEntryCoverUrl" type="url" placeholder="https://.../${region}/${gameId}.${extension}">
+      <p class="small muted">変数：${serial}（パッケージ品番）、${title}（タイトル）、${platform}（ハード）、${region}（画像サービス側の地域値）、${gameId}（特定した6文字ID）、${extension}（png / jpg）。設定値と実際の照合ログを「取得元・直近の照合ログ」で確認できます。</p>
+    </div>
     <div class="field" id="seriesParentField" hidden><label for="dictEntryParent">親シリーズ（任意）</label><select id="dictEntryParent"><option value="">なし（親シリーズ）</option></select><p class="small muted">例：親「マリオ」、子「マリオカート」。親子2階層で管理できます。</p></div>
     <p id="dictEntryError" class="error" role="alert"></p>
     <div class="form-actions"><button type="button" id="cancelDictionaryEntry" class="secondary">キャンセル</button><button type="button" id="saveDictionaryEntry" class="primary">保存</button></div>

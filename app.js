@@ -100,7 +100,7 @@ function defaultCategories() {
   ];
 }
 function normalizeEntry(raw) {
-  return { id: String(raw?.id || makeId("entry")), name: String(raw?.name || "").trim(), aliases: unique((Array.isArray(raw?.aliases) ? raw.aliases : []).map(x => String(x).trim()).filter(Boolean)), coverUrlTemplate: String(raw?.coverUrlTemplate || "").trim(), coverProvider: String(raw?.coverProvider || ""), parentId: String(raw?.parentId || "") };
+  return { id: String(raw?.id || makeId("entry")), name: String(raw?.name || "").trim(), aliases: unique((Array.isArray(raw?.aliases) ? raw.aliases : []).map(x => String(x).trim()).filter(Boolean)), coverUrlTemplate: String(raw?.coverUrlTemplate || "").trim(), coverProvider: String(raw?.coverProvider || ""), titleDataUrls: Array.isArray(raw?.titleDataUrls) ? raw.titleDataUrls.map(x => String(x).trim()).filter(Boolean) : [], parentId: String(raw?.parentId || "") };
 }
 function normalizeDictionaries(raw) {
   const defaults = defaultCategories();
@@ -123,22 +123,42 @@ function normalizeDictionaries(raw) {
   });
   return { version: 1, categories };
 }
+function defaultGameTdbCoverTemplate(provider) {
+  if (provider === "gametdb-wii") return "https://art.gametdb.com/wii/cover/${region}/${gameId}.${extension}";
+  if (provider === "gametdb-gc") return "https://art.gametdb.com/gc/cover/${region}/${gameId}.${extension}";
+  return "";
+}
+function defaultTitleDataUrls(provider) {
+  if (provider === "gametdb-wii") return [
+    "https://raw.githubusercontent.com/dolphin-emu/dolphin/master/Data/Sys/wiitdb-ja.txt",
+    "https://raw.githubusercontent.com/dolphin-emu/dolphin/master/Data/Sys/wiitdb-en.txt"
+  ];
+  // Separate GameCube ID/title index; libretro DAT exposes name + serial per game.
+  if (provider === "gametdb-gc") return ["https://raw.githubusercontent.com/libretro/libretro-database/master/dat/Nintendo%20-%20GameCube.dat"];
+  return [];
+}
 function ensureGameTdbHardwareEntries() {
   const category = getCategory("hardware");
   if (!category) return;
   const presets = [
     { name: "Wii", aliases: ["Nintendo Wii"], coverProvider: "gametdb-wii" },
-    { name: "GameCube", aliases: ["Nintendo GameCube", "GC", "ニンテンドーゲームキューブ"], coverProvider: "gametdb-wii" }
+    { name: "GameCube", aliases: ["Nintendo GameCube", "GC", "ニンテンドーゲームキューブ"], coverProvider: "gametdb-gc" }
   ];
   for (const preset of presets) {
     let item = resolveEntry(category, preset.name);
-    if (!item) item = category.entries.find(entry => entry.coverProvider === preset.coverProvider && entry.aliases.some(alias => preset.aliases.includes(alias)));
+    if (!item) item = category.entries.find(entry => entry.aliases.some(alias => preset.aliases.includes(alias)));
     if (!item) {
-      item = { id: makeId("entry"), name: preset.name, aliases: [...preset.aliases], coverUrlTemplate: "", coverProvider: preset.coverProvider, parentId: "" };
+      item = { id: makeId("entry"), name: preset.name, aliases: [...preset.aliases], coverUrlTemplate: defaultGameTdbCoverTemplate(preset.coverProvider), coverProvider: preset.coverProvider, titleDataUrls: defaultTitleDataUrls(preset.coverProvider), parentId: "" };
       category.entries.push(item);
     } else {
-      item.coverProvider = preset.coverProvider;
       item.aliases = unique([...(item.aliases || []), ...preset.aliases].filter(alias => normalizeName(alias) !== normalizeName(item.name)));
+      // Migrate the old incorrect GameCube provider once; otherwise respect a user's explicit provider choice.
+      if (preset.name === "GameCube" && item.coverProvider === "gametdb-wii") item.coverProvider = "gametdb-gc";
+      else if (!item.coverProvider && !item.coverUrlTemplate) item.coverProvider = preset.coverProvider;
+      if (item.coverProvider === preset.coverProvider) {
+        if (!item.coverUrlTemplate || /art\.gametdb\.com\/(wii|gc)\/cover/.test(item.coverUrlTemplate) && (preset.coverProvider === "gametdb-gc" && /\/wii\//.test(item.coverUrlTemplate) || preset.coverProvider === "gametdb-wii" && /\/gc\//.test(item.coverUrlTemplate))) item.coverUrlTemplate = defaultGameTdbCoverTemplate(preset.coverProvider);
+        if (!Array.isArray(item.titleDataUrls) || !item.titleDataUrls.length) item.titleDataUrls = defaultTitleDataUrls(preset.coverProvider);
+      }
     }
   }
 }
@@ -252,17 +272,17 @@ function wiiPackageRegionSuffix(region) {
   const value = String(region || "").normalize("NFKC").trim().toUpperCase();
   if (["JA", "JPN", "JP", "JAPAN", "日本"].includes(value)) return "JPN";
   if (["US", "USA", "NTSC-U", "NORTH AMERICA", "北米"].includes(value)) return "USA";
-  if (["EU", "EUR", "PAL", "EN", "EUROPE", "UK", "AUS", "欧州", "欧州版"].includes(value)) return "EUR";
+  if (["EU", "EUR", "PAL", "EN", "EUROPE", "UK", "欧州", "欧州版"].includes(value)) return "EUR";
   if (["KO", "KOR", "KOREA", "韓国"].includes(value)) return "KOR";
   if (["ZH", "TWN", "TAIWAN", "台湾"].includes(value)) return "TWN";
+  if (/^[A-Z]{3}$/.test(value)) return value;
   return "";
 }
 function getWiiMiddleCode(value) {
   const text = String(value || "").normalize("NFKC").trim().toUpperCase();
-  const packageMatch = text.match(/^(?:RVL[-\s]?)?(?:P[-\s]?)?([A-Z0-9]{4})(?:\s*[([]\s*(?:JPN|USA|EUR|KOR|TWN|[A-Z]{3})\s*[)\]])?$/);
+  const packageMatch = text.match(/^RVL[-\s]?P[-\s]?([A-Z0-9]{4})(?:\s*[([]\s*[A-Z]{3}\s*[)\]])?$/);
   if (packageMatch) return packageMatch[1];
-  const legacyMatch = text.match(/^(?:RVL[-\s]?)?([A-Z0-9]{4})(?:[-\s](?:JPN|USA|EUR|KOR|TWN|[A-Z]{3}))?$/);
-  return legacyMatch ? legacyMatch[1] : "";
+  return /^[A-Z0-9]{4}$/.test(text) ? text : "";
 }
 function renderCodeFields(existing = {}) {
   const selected = editionsSelected(); const box = $("editionCodes"); const wii = isWiiPlatformName($("platform").value);
@@ -307,6 +327,12 @@ $("region").addEventListener("input", () => {
 });
 let ocrTargetEdition = "";
 let tesseractLoadPromise = null;
+let ocrWorkerPromise = null;
+let ocrCameraStream = null;
+let ocrScanActive = false;
+let ocrScanBusy = false;
+let ocrScanTimer = null;
+let lastOcrCandidate = "";
 async function loadTesseract() {
   if (window.Tesseract) return window.Tesseract;
   if (!tesseractLoadPromise) tesseractLoadPromise = new Promise((resolve, reject) => {
@@ -319,66 +345,145 @@ async function loadTesseract() {
   });
   return tesseractLoadPromise;
 }
+async function getOcrWorker() {
+  const Tesseract = await loadTesseract();
+  if (!ocrWorkerPromise) ocrWorkerPromise = Tesseract.createWorker("eng").catch(error => { ocrWorkerPromise = null; throw error; });
+  return ocrWorkerPromise;
+}
 function suggestCodeFromOcr(raw, platform) {
-  const text = String(raw || "").normalize("NFKC").toUpperCase().replace(/[–—−]/g, "-");
+  const text = String(raw || "").normalize("NFKC").toUpperCase().replace(/[–—−‐‑]/g, "-").replace(/[\r\n]+/g, " ");
   if (isWiiPlatformName(platform)) {
-    const full = text.match(/RVL\s*[- ]?\s*P\s*[- ]?\s*([A-Z0-9]{4})\s*[([]?\s*(JPN|USA|EUR|KOR|TWN)\s*[)\]]?/);
-    if (full) return `RVL-P-${full[1]}${full[2] ? `(${full[2]})` : ""}`;
-    const legacy = text.match(/RVL\s*[- ]?\s*([A-Z0-9]{4})/);
-    if (legacy) return `RVL-P-${legacy[1]}`;
+    const full = text.match(/RVL\s*[- ]?\s*P\s*[- ]?\s*([A-Z0-9]{4})\s*[([]?\s*([A-Z]{3}|JAP|PAL|NTSC-U)\s*[)\]]?/);
+    if (full) return `RVL-P-${full[1]}(${({ JAP: "JPN", PAL: "EUR", "NTSC-U": "USA" })[full[2]] || full[2]})`;
+    const partial = text.match(/RVL\s*[- ]?\s*P\s*[- ]?\s*([A-Z0-9]{4})/);
+    if (partial) return `RVL-P-${partial[1]}`;
+  }
+  if (/gamecube|game cube|ニンテンドーゲームキューブ|\bgc\b/i.test(platform)) {
+    const gc = text.match(/GS\s*(?:\(([A-Z]{3})\))?\s*[- ]?\s*DOL\s*[- ]\s*([A-Z0-9]{4})\s*[- ]\s*([A-Z]{3})/);
+    if (gc) return gc[0].replace(/\s+/g, "");
+    const gcPartial = text.match(/GS\s*(?:\(([A-Z]{3})\))?\s*[- ]?\s*DOL\s*[- ]\s*([A-Z0-9]{4})/);
+    if (gcPartial) return gcPartial[0].replace(/\s+/g, "");
   }
   const token = text.match(/\b[A-Z0-9][A-Z0-9._-]{3,18}[A-Z0-9]\b/);
   return token ? token[0] : "";
 }
+function showOcrCandidate(code) {
+  const list = $("ocrCandidates");
+  if (!code) return;
+  const normalized = String(code).replace(/\s+/g, " ").trim();
+  if (normalized === lastOcrCandidate) return;
+  lastOcrCandidate = normalized;
+  list.innerHTML = `<button type="button" class="ocr-candidate" data-ocr-candidate="${escapeHtml(normalized)}"><span class="ocr-candidate-label">読み取った品番</span><strong>${escapeHtml(normalized)}</strong><span class="ocr-candidate-hint">タップして確定</span></button>`;
+  $("ocrScanStatus").textContent = "品番候補を検出しました。表示が正しければタップしてください。";
+}
+function stopOcrCamera() {
+  ocrScanActive = false; ocrScanBusy = false;
+  if (ocrScanTimer) clearTimeout(ocrScanTimer);
+  ocrScanTimer = null;
+  if (ocrCameraStream) ocrCameraStream.getTracks().forEach(track => track.stop());
+  ocrCameraStream = null;
+  const video = $("ocrVideo");
+  if (video) { video.pause(); video.srcObject = null; }
+  if ($("ocrManualScan")) $("ocrManualScan").disabled = true;
+}
+async function scanOcrFrame() {
+  if (!ocrScanActive || ocrScanBusy) return;
+  const video = $("ocrVideo"), canvas = $("ocrCanvas");
+  if (!video || video.readyState < 2 || !video.videoWidth) { ocrScanTimer = setTimeout(scanOcrFrame, 500); return; }
+  ocrScanBusy = true;
+  try {
+    const scale = Math.min(1, 1200 / video.videoWidth);
+    canvas.width = Math.round(video.videoWidth * scale); canvas.height = Math.round(video.videoHeight * scale);
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const worker = await getOcrWorker();
+    const result = await worker.recognize(canvas);
+    const raw = String(result?.data?.text || "").trim();
+    $("ocrRawText").value = raw;
+    const candidate = suggestCodeFromOcr(raw, $("platform").value);
+    if (candidate) showOcrCandidate(candidate);
+    else if (!lastOcrCandidate) $("ocrScanStatus").textContent = "品番を探しています。文字がはっきり映るように合わせてください。";
+  } catch (error) {
+    $("ocrScanStatus").textContent = error.message || "OCRを実行できませんでした。画像選択をお試しください。";
+  } finally {
+    ocrScanBusy = false;
+    if (ocrScanActive) ocrScanTimer = setTimeout(scanOcrFrame, 1100);
+  }
+}
+async function openOcrScanner(edition) {
+  ocrTargetEdition = edition || ""; lastOcrCandidate = ""; $("ocrManualScan").disabled = true;
+  $("ocrCandidates").innerHTML = ""; $("ocrRawText").value = "";
+  $("ocrScanStatus").textContent = "カメラを起動しています…";
+  $("codeOcrDialog").showModal();
+  if (!navigator.mediaDevices?.getUserMedia) {
+    $("ocrScanStatus").textContent = "このブラウザではカメラを起動できません。画像を選択してください。"; return;
+  }
+  try {
+    ocrCameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
+    const video = $("ocrVideo"); video.srcObject = ocrCameraStream;
+    await video.play(); ocrScanActive = true; $("ocrManualScan").disabled = false;
+    $("ocrScanStatus").textContent = "品番を探しています…";
+    scanOcrFrame();
+  } catch (error) {
+    stopOcrCamera();
+    $("ocrScanStatus").textContent = "カメラを起動できませんでした。権限を確認するか、画像を選択してください。";
+  }
+}
 $("editionCodes").addEventListener("click", event => {
   const button = event.target.closest("[data-ocr-edition]");
   if (!button) return;
-  ocrTargetEdition = button.dataset.ocrEdition || "";
-  $("codeOcrInput").value = "";
-  $("codeOcrInput").click();
+  openOcrScanner(button.dataset.ocrEdition || "");
 });
+$("ocrChooseImage").addEventListener("click", () => { stopOcrCamera(); $("codeOcrDialog").close(); $("codeOcrInput").click(); });
+$("ocrManualScan").addEventListener("click", () => { lastOcrCandidate = ""; scanOcrFrame(); });
 $("codeOcrInput").addEventListener("change", async event => {
   const file = event.target.files?.[0]; if (!file) return;
   if (!file.type.startsWith("image/")) { showToast("画像ファイルを選択してください"); return; }
-  showToast("画像から文字を読み取っています…");
+  if (!$("codeOcrDialog").open) $("codeOcrDialog").showModal();
+  $("ocrScanStatus").textContent = "画像から文字を読み取っています…";
   try {
-    const Tesseract = await loadTesseract();
-    const worker = await Tesseract.createWorker("eng");
-    let result;
-    try { result = await worker.recognize(file); }
-    finally { await worker.terminate(); }
+    const worker = await getOcrWorker();
+    const result = await worker.recognize(file);
     const raw = String(result?.data?.text || "").trim();
     if (!raw) throw new Error("文字を読み取れませんでした。明るい場所で品番に近づいて撮影してください");
     $("ocrRawText").value = raw;
-    $("ocrCodeValue").value = suggestCodeFromOcr(raw, $("platform").value);
-    $("codeOcrDialog").showModal();
+    const candidate = suggestCodeFromOcr(raw, $("platform").value);
+    if (candidate) showOcrCandidate(candidate);
+    else $("ocrScanStatus").textContent = "品番らしい文字列を特定できませんでした。再撮影するか、読み取った文字を確認してください。";
   } catch (error) {
-    showToast(error.message || "OCRに失敗しました");
+    $("ocrScanStatus").textContent = error.message || "OCRに失敗しました";
   } finally { event.target.value = ""; }
 });
-function closeCodeOcrDialog() { $("codeOcrDialog").close(); }
+function closeCodeOcrDialog() { stopOcrCamera(); $("codeOcrDialog").close(); }
 $("closeCodeOcr").addEventListener("click", closeCodeOcrDialog);
 $("cancelCodeOcr").addEventListener("click", closeCodeOcrDialog);
-$("applyCodeOcr").addEventListener("click", () => {
-  const value = $("ocrCodeValue").value.normalize("NFKC").trim().toUpperCase();
-  if (!value) { showToast("品番として反映する文字列を入力してください"); return; }
+$("codeOcrDialog").addEventListener("close", stopOcrCamera);
+function applyRecognizedPackageCode(value) {
+  const normalized = String(value || "").normalize("NFKC").trim().toUpperCase();
+  if (!normalized) { showToast("品番を認識できませんでした"); return; }
   if (isWiiPlatformName($("platform").value)) {
-    const match = value.match(/RVL[-\s]?P[-\s]?([A-Z0-9]{4})(?:\s*[([]\s*(JPN|USA|EUR|KOR|TWN)\s*[)\]])?/i);
-    const middle = getWiiMiddleCode(value);
-    if (!middle) { showToast("Wiiの品番を認識できません。RVL-P-SMNJ(JPN) の形式を確認してください"); return; }
+    const match = normalized.match(/RVL[-\s]?P[-\s]?([A-Z0-9]{4})(?:\s*[([]\s*([A-Z]{3})\s*[)\]])?/i);
+    const middle = getWiiMiddleCode(normalized);
+    if (!middle) { showToast("Wiiの品番を特定できません。RVL-P-XXXX(地域) の形式を確認してください"); return; }
     if (match?.[2]) $("region").value = match[2];
     const old = {};
     $("editionCodes").querySelectorAll("[data-code-edition]").forEach(input => old[input.dataset.codeEdition] = input.value);
-    old[ocrTargetEdition] = value;
+    old[ocrTargetEdition] = normalized;
     renderCodeFields(old);
     const middleInput = [...$("editionCodes").querySelectorAll("[data-wii-middle]")].find(input => input.dataset.wiiMiddle === ocrTargetEdition);
     if (middleInput) { middleInput.value = middle; syncWiiCodeInput(middleInput); }
   } else {
     const input = [...$("editionCodes").querySelectorAll("[data-code-edition]")].find(item => item.dataset.codeEdition === ocrTargetEdition);
-    if (input) input.value = value;
+    if (input) input.value = normalized;
+    const gcRegion = normalized.match(/DOL[-\s]?[A-Z0-9]{4}[-\s]([A-Z]{3})/i);
+    if (gcRegion) $("region").value = gcRegion[1];
   }
   closeCodeOcrDialog();
-  showToast(`${ocrTargetEdition || "選択したエディション"}の品番にOCR結果を反映しました。保存前に確認してください`);
+  showToast(`${ocrTargetEdition || "選択したエディション"}の品番を反映しました。保存前に確認してください`);
+}
+$("ocrCandidates").addEventListener("click", event => {
+  const candidate = event.target.closest("[data-ocr-candidate]");
+  if (candidate) applyRecognizedPackageCode(candidate.dataset.ocrCandidate);
 });
 
 $("addEditionBtn").addEventListener("click", async () => {
@@ -729,8 +834,8 @@ function getCoverTemplateForPlatform(platform) {
   const entry = resolveEntry(category, platform);
   return entry?.coverUrlTemplate || "";
 }
-function makeCoverUrl(template, serial, title, platform, region) {
-  return template.replace(/\$\{serial\}/g, encodeURIComponent(serial)).replace(/\$\{title\}/g, encodeURIComponent(title)).replace(/\$\{platform\}/g, encodeURIComponent(platform)).replace(/\$\{region\}/g, encodeURIComponent(region || ""));
+function makeCoverUrl(template, serial, title, platform, region, gameId = "", extension = "png") {
+  return template.replace(/\$\{serial\}/g, encodeURIComponent(serial)).replace(/\$\{title\}/g, encodeURIComponent(title)).replace(/\$\{platform\}/g, encodeURIComponent(platform)).replace(/\$\{region\}/g, encodeURIComponent(region || "")).replace(/\$\{gameId\}/g, encodeURIComponent(gameId)).replace(/\$\{extension\}/g, encodeURIComponent(extension));
 }
 function probeImage(url) {
   return new Promise(resolve => { const image = new Image(); image.onload = () => resolve(true); image.onerror = () => resolve(false); image.src = url; });
@@ -744,44 +849,72 @@ $("useCoverUrl").addEventListener("click", async () => {
   if (await probeImage(url)) { applyCoverUrl(url); showToast("画像URLを適用しました"); }
   else showToast("画像を表示できません。画像ファイルのURLか確認してください");
 });
-const GAMETDB_TITLE_SOURCES = [
-  "https://raw.githubusercontent.com/dolphin-emu/dolphin/master/Data/Sys/wiitdb-ja.txt",
-  "https://raw.githubusercontent.com/dolphin-emu/dolphin/master/Data/Sys/wiitdb-en.txt"
-];
-let gameTdbTitleIndexPromise = null;
+let gameTdbTitleIndexPromises = new Map();
+let lastCoverLookupLog = "取得ログはまだありません。";
+function setCoverLookupLog(lines) {
+  lastCoverLookupLog = Array.isArray(lines) ? lines.join("\n") : String(lines || "");
+  const target = $("coverLookupLog"); if (target) target.textContent = lastCoverLookupLog;
+}
+function getHardwareEntry(platform) { return resolveEntry(getCategory("hardware"), platform); }
 function normalizeGameTitle(value) {
   return String(value || "").normalize("NFKC").toLocaleLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
 }
-async function loadGameTdbTitleIndex() {
-  if (!gameTdbTitleIndexPromise) {
-    gameTdbTitleIndexPromise = (async () => {
-      const results = await Promise.allSettled(GAMETDB_TITLE_SOURCES.map(async url => {
+async function loadGameTdbTitleIndex(platform) {
+  const hardware = getHardwareEntry(platform);
+  const provider = hardware?.coverProvider || "";
+  const urls = Array.isArray(hardware?.titleDataUrls) ? hardware.titleDataUrls.filter(Boolean) : [];
+  if (!urls.length) throw new Error(`${platform}のタイトルデータURLが未設定です。データ管理 → マスタ辞書 → ハード → ${platform} の「タイトルデータURL」を設定してください。`);
+  const cacheKey = `${provider}|${urls.join("|")}`;
+  if (!gameTdbTitleIndexPromises.has(cacheKey)) {
+    const promise = (async () => {
+      const results = await Promise.allSettled(urls.map(async url => {
         const response = await fetch(url, { cache: "no-cache" });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        return response.text();
+        if (!response.ok) throw new Error(`${url} (HTTP ${response.status})`);
+        return { url, text: await response.text() };
       }));
-      const texts = results.filter(result => result.status === "fulfilled").map(result => result.value);
-      if (!texts.length) throw new Error("GameTDBの作品データを取得できませんでした");
+      const fulfilled = results.filter(result => result.status === "fulfilled").map(result => result.value);
+      const errors = results.filter(result => result.status === "rejected").map(result => result.reason?.message || String(result.reason));
+      if (!fulfilled.length) throw new Error(`タイトルデータを取得できませんでした。\n${errors.join("\n")}`);
       const index = new Map();
-      for (const text of texts) {
-        for (const line of text.split(/\r?\n/)) {
+      const addRecord = (idValue, nameValue) => {
+        const id = String(idValue || "").trim().toUpperCase();
+        const name = String(nameValue || "").trim();
+        if (!/^[A-Z0-9]{6}$/.test(id) || !name) return;
+        if (!index.has(id)) index.set(id, { id, names: new Set() });
+        index.get(id).names.add(name);
+      };
+      for (const { text } of fulfilled) {
+        const lines = text.split(/\r?\n/);
+        let datName = "", datSerial = "", inGame = false;
+        const flushDatGame = () => { addRecord(datSerial, datName); datName = ""; datSerial = ""; };
+        for (const line of lines) {
           const match = line.match(/^\s*([A-Z0-9]{6})\s*=\s*(.*?)\s*$/);
-          if (!match || !match[2]) continue;
-          const id = match[1], name = match[2].trim();
-          if (!index.has(id)) index.set(id, { id, names: new Set() });
-          index.get(id).names.add(name);
+          if (match) { addRecord(match[1], match[2]); continue; }
+          if (/^\s*game\s*\(/i.test(line)) { if (inGame) flushDatGame(); inGame = true; continue; }
+          if (!inGame) continue;
+          const nameMatch = line.match(/^\s*name\s+"((?:[^"\\]|\\.)*)"/i);
+          if (nameMatch && !datName) datName = nameMatch[1].replace(/\\"/g, '"');
+          const serialMatch = line.match(/^\s*serial\s+"([A-Z0-9]{6})"/i);
+          if (serialMatch && !datSerial) datSerial = serialMatch[1];
+          // A new game starts flush the previous record; nested rom blocks do not reset it.
         }
+        if (inGame) flushDatGame();
       }
-      if (!index.size) throw new Error("GameTDBの作品データを読み取れませんでした");
-      return [...index.values()].map(item => ({ id: item.id, names: [...item.names], normalizedNames: [...item.names].map(normalizeGameTitle).filter(Boolean) }));
-    })().catch(error => { gameTdbTitleIndexPromise = null; throw error; });
+      if (!index.size) throw new Error("タイトルデータを対応するID / タイトル形式として読み取れませんでした");
+      return { records: [...index.values()].map(item => ({ id: item.id, names: [...item.names], normalizedNames: [...item.names].map(normalizeGameTitle).filter(Boolean) })), urls: fulfilled.map(item => item.url), errors };
+    })().catch(error => { gameTdbTitleIndexPromises.delete(cacheKey); throw error; });
+    gameTdbTitleIndexPromises.set(cacheKey, promise);
   }
-  return gameTdbTitleIndexPromise;
+  return gameTdbTitleIndexPromises.get(cacheKey);
 }
-function getPackageGameCodePrefix(serial) {
-  const value = String(serial || "").normalize("NFKC").trim().toUpperCase();
-  const wii = value.match(/\bRVL[-\s]?P[-\s]?([A-Z0-9]{4})(?:\s*[([]|$)/) || value.match(/\bRVL[-\s]?([A-Z0-9]{4})(?:[-\s]|$)/);
-  if (wii) return wii[1];
+function getPackageGameCodePrefix(serial, platform = "") {
+  const value = String(serial || "").normalize("NFKC").trim().toUpperCase().replace(/[–—−]/g, "-");
+  if (isWiiPlatformName(platform) || /RVL/.test(value)) {
+    const wii = value.match(/\bRVL[-\s]?P[-\s]?([A-Z0-9]{4})/) || value.match(/\bRVL[-\s]?([A-Z0-9]{4})/);
+    if (wii) return wii[1];
+  }
+  const gc = value.match(/GS\s*(?:\([A-Z]{3}\))?\s*[- ]?\s*DOL[-\s]?([A-Z0-9]{4})/);
+  if (gc) return gc[1];
   return /^[A-Z0-9]{4}$/.test(value) ? value : "";
 }
 function gameTdbRegionInfo(region, serial, gameId = "") {
@@ -795,12 +928,13 @@ function gameTdbRegionInfo(region, serial, gameId = "") {
   const byId = { J: "JA", E: "US", P: "EN", K: "KO", W: "ZH", A: "EN", R: "RU" };
   return { idRegion, coverRegion: byId[idRegion] || "EN" };
 }
-async function resolveGameTdbId(title, serial, region) {
+async function resolveGameTdbId(title, serial, region, platform) {
   const rawSerial = String(serial || "").trim().toUpperCase();
-  if (/^[A-Z0-9]{6}$/.test(rawSerial)) return rawSerial;
-  const records = await loadGameTdbTitleIndex();
+  if (/^[A-Z0-9]{6}$/.test(rawSerial)) return { id: rawSerial, candidates: [rawSerial], urls: [], recordCount: 0 };
+  const loaded = await loadGameTdbTitleIndex(platform);
+  const records = loaded.records;
   const titleKey = normalizeGameTitle(title);
-  const prefix = getPackageGameCodePrefix(serial);
+  const prefix = getPackageGameCodePrefix(serial, platform);
   const regionInfo = gameTdbRegionInfo(region, serial);
   let candidates = titleKey ? records.filter(record => record.normalizedNames.includes(titleKey)) : [];
   if (!candidates.length && titleKey.length >= 5) {
@@ -816,22 +950,34 @@ async function resolveGameTdbId(title, serial, region) {
     const regional = candidates.filter(record => record.id[3] === regionInfo.idRegion);
     if (regional.length) candidates = regional;
   }
-  if (candidates.length === 1) return candidates[0].id;
-  if (!candidates.length) throw new Error("品番・タイトルに一致するGameTDB IDが見つかりませんでした");
-  throw new Error("GameTDB IDの候補が複数あります。タイトル・地域・品番を確認してください");
+  if (candidates.length === 1) return { id: candidates[0].id, candidates: candidates.map(record => record.id), urls: loaded.urls, recordCount: records.length };
+  if (!candidates.length) throw new Error("品番・タイトルに一致するゲームIDが見つかりませんでした");
+  throw new Error(`ゲームIDの候補が複数あります（${candidates.map(record => record.id).join(", ")}）。タイトル・地域・品番を確認してください`);
 }
 async function lookupGameTdbCover(title, platform, region, codes) {
+  const hardware = getHardwareEntry(platform);
+  const provider = hardware?.coverProvider || "";
+  if (!/^gametdb-(wii|gc)$/.test(provider)) throw new Error("このハードにGameTDBプロバイダーが設定されていません");
   const serial = codes.find(Boolean) || "";
-  const id = await resolveGameTdbId(title, serial, region);
+  const lines = [`ハード: ${platform}`, `プロバイダー: ${provider}`, `タイトル: ${title}`, `地域入力: ${region || "（空欄）"}`, `パッケージ品番: ${serial || "（空欄）"}`, `タイトルデータURL: ${(hardware.titleDataUrls || []).join(" | ") || "（未設定）"}`, `カバーURLテンプレート: ${hardware.coverUrlTemplate || "（未設定）"}`];
+  setCoverLookupLog(lines);
+  const resolved = await resolveGameTdbId(title, serial, region, platform);
+  const id = resolved.id;
+  lines.push(`取得レコード数: ${resolved.recordCount}`, `照合ID: ${id}`, `候補: ${resolved.candidates.join(", ")}`, `使用データURL: ${resolved.urls.join(" | ")}`);
   const regionInfo = gameTdbRegionInfo(region, serial, id);
   const regions = unique([regionInfo.coverRegion, ({ J: "JA", E: "US", P: "EN", K: "KO", W: "ZH" })[id[3]] || "EN"]);
+  const template = hardware.coverUrlTemplate || defaultGameTdbCoverTemplate(provider);
+  const consolePath = provider === "gametdb-gc" ? "gc" : "wii";
   for (const coverRegion of regions) {
     for (const extension of ["png", "jpg"]) {
-      const url = `https://art.gametdb.com/wii/cover/${coverRegion}/${id}.${extension}`;
-      if (await probeImage(url)) return { url, id, coverRegion };
+      let url = makeCoverUrl(template, serial, title, platform, coverRegion, id, extension);
+      if (!/\$\{(gameId|extension|region)\}/.test(template)) url = `https://art.gametdb.com/${consolePath}/cover/${coverRegion}/${id}.${extension}`;
+      lines.push(`画像確認: ${url}`); setCoverLookupLog(lines);
+      if (await probeImage(url)) { lines.push(`結果: 画像を取得できました (${coverRegion})`); setCoverLookupLog(lines); return { url, id, coverRegion }; }
     }
   }
-  throw new Error(`GameTDB ID ${id} は特定できましたが、対応するカバー画像が見つかりませんでした`);
+  lines.push("結果: IDは特定できましたが、候補地域の画像URLでは画像を取得できませんでした"); setCoverLookupLog(lines);
+  throw new Error(`ゲームID ${id} は特定できましたが、対応するカバー画像が見つかりませんでした`);
 }
 $("lookupCodeCoverBtn").addEventListener("click", async () => {
   const title = $("title").value.trim(), platform = $("platform").value.trim(), region = $("region").value.trim();
@@ -839,14 +985,14 @@ $("lookupCodeCoverBtn").addEventListener("click", async () => {
   const template = getCoverTemplateForPlatform(platform);
   if (!title || !platform) { showToast("タイトルとハードを入力してください"); return; }
   const hardwareEntry = resolveEntry(getCategory("hardware"), platform);
-  if (hardwareEntry?.coverProvider === "gametdb-wii" && !template) {
+  if (/^gametdb-(wii|gc)$/.test(hardwareEntry?.coverProvider || "")) {
     const button = $("lookupCodeCoverBtn"); button.disabled = true; button.textContent = "オンライン照合中…";
     try {
       const result = await lookupGameTdbCover(title, platform, region, codes);
       applyCoverUrl(result.url);
-      showToast(`GameTDBで照合しました（${result.id}・${result.coverRegion}）`);
+      showToast(`オンライン照合しました（${result.id}・${result.coverRegion}）`);
     } catch (error) {
-      showToast(`${error.message || "GameTDBの照合に失敗しました"}。画像は変更されていません`);
+      setCoverLookupLog(`${lastCoverLookupLog}\nエラー: ${error.message || "照合に失敗しました"}`); showToast(`${error.message || "GameTDBの照合に失敗しました"}。画像は変更されていません`);
     } finally { button.disabled = false; button.textContent = "品番からジャケット取得"; }
     return;
   }
@@ -984,7 +1130,7 @@ function renderDictionaryEntries() {
   list.innerHTML = category.entries.map(item => {
     const uses = entryUseCount(category, item);
     const parent = category.id === "series" ? category.entries.find(entry => entry.id === item.parentId) : null;
-    return `<article class="dict-entry"><div class="dict-entry-text"><strong>${escapeHtml(item.name)}</strong>${parent ? `<span class="dict-usage">親シリーズ：${escapeHtml(parent.name)}</span>` : ""}<span class="dict-aliases">別名：${item.aliases.length ? escapeHtml(item.aliases.join("、")) : "なし"}</span><span class="dict-usage">${category.binding ? `ゲームで使用中：${uses}件` : "独立した辞書項目"}</span>${category.id === "hardware" && item.coverProvider === "gametdb-wii" ? '<span class="dict-usage">GameTDBオンライン照合（Wii・GameCube）</span>' : ''}${category.id === "hardware" && item.coverUrlTemplate ? '<span class="dict-usage">独自ジャケットURL設定済み</span>' : ''}</div><div class="dict-entry-actions"><button type="button" class="quiet" data-move-entry="${escapeHtml(item.id)}" data-direction="-1" aria-label="${escapeHtml(item.name)}を上へ" ${category.entries[0]?.id === item.id ? "disabled" : ""}>↑</button><button type="button" class="quiet" data-move-entry="${escapeHtml(item.id)}" data-direction="1" aria-label="${escapeHtml(item.name)}を下へ" ${category.entries.at(-1)?.id === item.id ? "disabled" : ""}>↓</button><button type="button" class="quiet" data-edit-entry="${escapeHtml(item.id)}">編集</button><button type="button" class="quiet" data-delete-entry="${escapeHtml(item.id)}">削除</button></div></article>`;
+    return `<article class="dict-entry"><div class="dict-entry-text"><strong>${escapeHtml(item.name)}</strong>${parent ? `<span class="dict-usage">親シリーズ：${escapeHtml(parent.name)}</span>` : ""}<span class="dict-aliases">別名：${item.aliases.length ? escapeHtml(item.aliases.join("、")) : "なし"}</span><span class="dict-usage">${category.binding ? `ゲームで使用中：${uses}件` : "独立した辞書項目"}</span>${category.id === "hardware" && item.coverProvider === "gametdb-wii" ? '<span class="dict-usage">GameTDBオンライン照合（Wii）</span>' : category.id === "hardware" && item.coverProvider === "gametdb-gc" ? '<span class="dict-usage">GameTDBカバー照合（GameCube・タイトルデータURL要設定）</span>' : ''}${category.id === "hardware" && !item.coverProvider && item.coverUrlTemplate ? '<span class="dict-usage">独自ジャケットURL設定済み</span>' : ''}</div><div class="dict-entry-actions"><button type="button" class="quiet" data-move-entry="${escapeHtml(item.id)}" data-direction="-1" aria-label="${escapeHtml(item.name)}を上へ" ${category.entries[0]?.id === item.id ? "disabled" : ""}>↑</button><button type="button" class="quiet" data-move-entry="${escapeHtml(item.id)}" data-direction="1" aria-label="${escapeHtml(item.name)}を下へ" ${category.entries.at(-1)?.id === item.id ? "disabled" : ""}>↓</button><button type="button" class="quiet" data-edit-entry="${escapeHtml(item.id)}">編集</button><button type="button" class="quiet" data-delete-entry="${escapeHtml(item.id)}">削除</button></div></article>`;
   }).join("");
   list.querySelectorAll("[data-edit-entry]").forEach(button => button.addEventListener("click", () => {
     const item = category.entries.find(e => e.id === button.dataset.editEntry); if (item) showDictionaryEntryEditor(item);
@@ -1006,13 +1152,27 @@ function showDictionaryEntryEditor(item = null) {
   const activeCategory = currentDictionaryCategory();
   const isHardware = activeCategory?.id === "hardware";
   $("hardwareCoverUrlField").hidden = !isHardware;
-  $("dictEntryCoverUrl").value = isHardware ? (item?.coverUrlTemplate || "") : "";
+  $("dictEntryCoverProvider").value = isHardware ? (item?.coverProvider || "") : "";
+  $("dictEntryCoverProvider").dataset.previousProvider = isHardware ? (item?.coverProvider || "") : "";
+  $("dictEntryTitleDataUrls").value = isHardware ? (item?.titleDataUrls || []).join("\n") : "";
+  $("dictEntryCoverUrl").value = isHardware ? (item?.coverUrlTemplate || defaultGameTdbCoverTemplate(item?.coverProvider || "")) : "";
+  $("hardwareProviderHelp").textContent = isHardware ? (item?.coverProvider === "gametdb-wii" ? "Wii：Dolphinが管理するGameTDB由来のタイトル一覧を使用します。" : item?.coverProvider === "gametdb-gc" ? "GameCube：Wiiとは別のタイトル一覧を使用します。初期URLはlibretro-databaseのGameCube DATです。ID = タイトル形式と、name / serial を含むDAT形式に対応します。" : "独自URLを使う場合は、取得先の仕様とURL変数を設定してください。") : "";
   const isSeries = activeCategory?.id === "series";
   $("seriesParentField").hidden = !isSeries;
   if (isSeries) { const parents = activeCategory.entries.filter(entry => !entry.parentId && entry.id !== item?.id); $("dictEntryParent").innerHTML = `<option value="">なし（親シリーズ）</option>` + parents.map(entry => `<option value="${escapeHtml(entry.id)}" ${entry.id === item?.parentId ? "selected" : ""}>${escapeHtml(entry.name)}</option>`).join(""); }
   $("dictEntryName").focus();
 }
-function hideDictionaryEntryEditor() { $("dictEntryEditor").hidden = true; $("dictEntryId").value = ""; $("dictEntryName").value = ""; $("dictEntryAliases").value = ""; $("dictEntryCoverUrl").value = ""; $("hardwareCoverUrlField").hidden = true; $("seriesParentField").hidden = true; $("dictEntryError").textContent = ""; }
+$("dictEntryCoverProvider").addEventListener("change", () => {
+  const provider = $("dictEntryCoverProvider").value;
+  const previous = $("dictEntryCoverProvider").dataset.previousProvider || "";
+  const current = $("dictEntryCoverUrl").value.trim();
+  if (!current || /art\.gametdb\.com\/(wii|gc)\/cover/.test(current)) $("dictEntryCoverUrl").value = defaultGameTdbCoverTemplate(provider);
+  if (provider === "gametdb-gc" && previous === "gametdb-wii" && defaultTitleDataUrls(previous).join("\n") === $("dictEntryTitleDataUrls").value.trim()) $("dictEntryTitleDataUrls").value = "";
+  if (provider === "gametdb-wii" && !$("dictEntryTitleDataUrls").value.trim()) $("dictEntryTitleDataUrls").value = defaultTitleDataUrls(provider).join("\n");
+  $("dictEntryCoverProvider").dataset.previousProvider = provider;
+  $("hardwareProviderHelp").textContent = provider === "gametdb-wii" ? "Wii：Dolphinが管理するGameTDB由来のタイトル一覧を使用します。" : provider === "gametdb-gc" ? "GameCube：Wiiとは別のタイトル一覧を使用します。初期URLはlibretro-databaseのGameCube DATです。ID = タイトル形式と、name / serial を含むDAT形式に対応します。" : "独自URLを使う場合は、取得先の仕様とURL変数を設定してください。";
+});
+function hideDictionaryEntryEditor() { $("dictEntryEditor").hidden = true; $("dictEntryId").value = ""; $("dictEntryName").value = ""; $("dictEntryAliases").value = ""; $("dictEntryCoverUrl").value = ""; $("dictEntryCoverProvider").value = ""; $("dictEntryTitleDataUrls").value = ""; $("hardwareCoverUrlField").hidden = true; $("seriesParentField").hidden = true; $("dictEntryError").textContent = ""; }
 $("openDictionary").addEventListener("click", () => { renderDictionaryCategories(); $("dictionaryDialog").showModal(); });
 $("closeDictionary").addEventListener("click", () => $("dictionaryDialog").close());
 $("closeDictionaryBottom").addEventListener("click", () => $("dictionaryDialog").close());
@@ -1029,16 +1189,20 @@ $("saveDictionaryEntry").addEventListener("click", async () => {
   const collision = checkCollision(category, name, aliases, id);
   if (collision) { $("dictEntryError").textContent = `「${collision}」の正式名称または別名と重複しています。別名を修正してください。`; return; }
   const coverUrlTemplate = category.id === "hardware" ? $("dictEntryCoverUrl").value.trim() : (existing?.coverUrlTemplate || "");
+  const coverProvider = category.id === "hardware" ? $("dictEntryCoverProvider").value : (existing?.coverProvider || "");
+  const titleDataUrls = category.id === "hardware" ? unique($("dictEntryTitleDataUrls").value.split(/\r?\n/).map(value => value.trim()).filter(Boolean)) : (existing?.titleDataUrls || []);
   const parentId = category.id === "series" ? $("dictEntryParent").value : (existing?.parentId || "");
   if (category.id === "series" && parentId && parentId === id) { $("dictEntryError").textContent = "自分自身を親シリーズにはできません。"; return; }
-  if (coverUrlTemplate && (!/^https?:\/\//i.test(coverUrlTemplate) || !/\$\{(serial|title)\}/.test(coverUrlTemplate))) { $("dictEntryError").textContent = "URLには http(s) と ${serial}（品番）または ${title}（タイトル）の変数を含めてください。"; return; }
+  if (coverUrlTemplate && (!/^https?:\/\//i.test(coverUrlTemplate) || !/\$\{(serial|title|gameId)\}/.test(coverUrlTemplate))) { $("dictEntryError").textContent = "URLには http(s) と ${serial}（品番）、${title}（タイトル）、${gameId}（ゲームID）のいずれかを含めてください。"; return; }
+  const badTitleUrl = titleDataUrls.find(url => !/^https?:\/\//i.test(url));
+  if (badTitleUrl) { $("dictEntryError").textContent = `タイトルデータURLは http:// または https:// から始めてください：${badTitleUrl}`; return; }
   if (existing) {
     const oldSnapshot = { ...existing, aliases: [...existing.aliases] };
     if (existing.name !== name) replaceEntryReferences(category, oldSnapshot, name);
     existing.name = name; existing.aliases = aliases;
-    if (category.id === "hardware") existing.coverUrlTemplate = coverUrlTemplate;
+    if (category.id === "hardware") { existing.coverUrlTemplate = coverUrlTemplate; existing.coverProvider = coverProvider; existing.titleDataUrls = titleDataUrls; }
     if (category.id === "series") existing.parentId = parentId;
-  } else category.entries.push({ id: makeId("entry"), name, aliases, ...(category.id === "hardware" ? { coverUrlTemplate } : {}), ...(category.id === "series" ? { parentId } : {}) });
+  } else category.entries.push({ id: makeId("entry"), name, aliases, ...(category.id === "hardware" ? { coverUrlTemplate, coverProvider, titleDataUrls } : {}), ...(category.id === "series" ? { parentId } : {}) });
   if (!await persistDictionaries()) return;
   if (!await persist()) return;
   hideDictionaryEntryEditor(); renderDictionaryCategories(); showToast(existing ? "辞書項目を更新しました" : "辞書項目を追加しました");
